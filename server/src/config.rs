@@ -7,6 +7,7 @@ pub struct Config {
     pub web_root: PathBuf,
     pub elevenlabs_api_key: Option<String>,
     pub elevenlabs_agent_id: String,
+    pub elevenlabs_dental_agent_id: Option<String>,
     pub elevenlabs_webhook_secret: Option<String>,
     pub monitor_webhook_secret: Option<String>,
     pub tool_api_key: Option<String>,
@@ -27,6 +28,7 @@ impl Config {
             elevenlabs_api_key: non_empty("ELEVENLABS_API_KEY"),
             elevenlabs_agent_id: std::env::var("ELEVENLABS_AGENT_ID")
                 .unwrap_or_else(|_| "agent_1101m2b4acdnedz9y2yky3w9vwfm".to_owned()),
+            elevenlabs_dental_agent_id: non_empty("ELEVENLABS_DENTAL_AGENT_ID"),
             elevenlabs_webhook_secret: non_empty("ELEVENLABS_WEBHOOK_SECRET"),
             monitor_webhook_secret: non_empty("MONITOR_WEBHOOK_SECRET"),
             tool_api_key: non_empty("TOOL_API_KEY"),

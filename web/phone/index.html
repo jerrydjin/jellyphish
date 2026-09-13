@@ -360,8 +360,8 @@
     <audio id="handoff-remote" autoplay playsinline></audio>
 
     <script type="module">
-      import { applyLiveTurn, liveTranscriptPayload, normalizeConversationMessage, normalizeDebugEvent, normalizeIncomingSocketEvent, SOL_OPENING_LINE } from "/call-lifecycle.mjs";
-      import { callerPreviewFromTurns, HandoffCall } from "/handoff-call.mjs";
+      import { applyLiveTurn, liveTranscriptPayload, normalizeConversationMessage, normalizeIncomingSocketEvent } from "/call-lifecycle.mjs?v=stream6";
+      import { callerPreviewFromTurns, HandoffCall } from "/handoff-call.mjs?v=stream6";
 
       let ConversationClient = null;
       const clientReady = import("https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.25.0/+esm")
@@ -369,10 +369,13 @@
         .catch(() => {});
 
       // Business lines that pick up. A contact whose line is missing here rings out.
-      // Add "dental-clinic": { agentId: "agent_…" } once the dental agent exists.
       const LINES = { "studio-sol": { agentId: "agent_1101m2b4acdnedz9y2yky3w9vwfm" } };
       fetch("/api/health").then((response) => response.json()).then((health) => {
-        if (health?.agentId) LINES["studio-sol"].agentId = health.agentId;
+        const lines = health?.lines || {};
+        for (const [line, info] of Object.entries(lines)) {
+          if (info?.agentId) LINES[line] = { agentId: info.agentId };
+        }
+        if (health?.agentId && !LINES["studio-sol"]) LINES["studio-sol"] = { agentId: health.agentId };
       }).catch(() => {});
 
       // Fictional numbers from the ACMA ranges reserved for drama productions.
@@ -387,13 +390,13 @@
         { name: "Coffee Club – Degraves", number: "(03) 5550 1184", label: "work" },
         { name: "Dad", number: "0491 570 737", label: "mobile" },
         { name: "Daniel Park", number: "0491 571 266", label: "mobile" },
-        { name: "Dental Clinic", number: "(03) 5550 7316", label: "work", line: "dental-clinic" },
+        { name: "Evan & Kevin Dental", number: "(03) 5550 7316", label: "work", company: "Evan & Kevin Dental", line: "dental-clinic" },
         { name: "Dr Patel (GP)", number: "(03) 5550 2290", label: "work" },
         { name: "Emma Rossi", number: "0491 571 491", label: "mobile" },
         { name: "Ethan – Work", number: "0491 571 804", label: "work" },
         { name: "Grace Lee", number: "0491 572 549", label: "mobile" },
         { name: "Gym – Front Desk", number: "(03) 5550 3307", label: "work" },
-        { name: "Hair Salon", number: "(03) 5550 4821", label: "work", company: "Studio Sol Hair", line: "studio-sol" },
+        { name: "Barbershop", number: "(03) 5550 4821", label: "work", company: "Barbershop", line: "studio-sol" },
         { name: "Harry Thompson", number: "0491 572 665", label: "mobile" },
         { name: "Home", number: "(03) 5550 6012", label: "home" },
         { name: "Isla Morgan", number: "0491 572 983", label: "mobile" },
@@ -422,7 +425,7 @@
         { name: "Zoe Clarke", number: "(03) 5550 1999", label: "home" },
       ];
       const byName = (name) => CONTACTS.find((contact) => contact.name === name);
-      const FAVOURITES = ["Mum", "Hair Salon", "Dental Clinic", "Dad"].map(byName);
+      const FAVOURITES = ["Mum", "Barbershop", "Evan & Kevin Dental", "Dad"].map(byName);
 
       const DAY = 86_400_000;
       const weekday = new Intl.DateTimeFormat([], { weekday: "long" });
@@ -657,15 +660,21 @@
       let call = null;
       let callerHandoff = null;
       let handoffRelease = false;
+      let handoffRingTimer = null;
 
-      async function waitThenEndAgent(current) {
-        handoffRelease = true;
-        const deadline = Date.now() + 6000;
-        while (current.mode === "speaking" && Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, 150));
+      function startHandoffRingback() {
+        stopHandoffRingback();
+        const ring = () => { tone(RINGBACK, .4, .045); tone(RINGBACK, .4, .045, .6); };
+        ring();
+        handoffRingTimer = setInterval(ring, 3000);
+      }
+
+      function stopHandoffRingback() {
+        if (handoffRingTimer) {
+          clearInterval(handoffRingTimer);
+          handoffRingTimer = null;
         }
-        try { await current.session?.endSession(); } catch {}
-        current.session = null;
+        stopTones();
       }
 
       async function startStaffHandoff(current, parameters = {}) {
@@ -674,22 +683,44 @@
         const preview = callerPreviewFromTurns(current.transcript);
         callerHandoff = new HandoffCall({
           role: "caller",
+          line: current.line,
           sessionId,
           remoteAudio: $("handoff-remote"),
           onState: (phase) => {
-            if (phase === "ended" || phase === "timeout") {
+            if (phase === "connected") stopHandoffRingback();
+            if (["ended", "timeout", "failed", "disconnected"].includes(phase)) {
+              stopHandoffRingback();
               callerHandoff = null;
               handoffRelease = false;
               if (!current.over) finishCall(current);
             }
           },
+          onTranscript: ({ role, text }) => {
+            ingestLiveTurn(current, { role: role === "staff" ? "staff" : "caller", message: text, pending: false });
+          },
         });
-        await callerHandoff.startCaller({
-          disclosureGiven: parameters.disclosure_given !== false,
-          callerName: preview.callerName,
-          requestedAction: preview.requestedAction || parameters.requested_action || "",
-        });
-        waitThenEndAgent(current);
+        try {
+          await callerHandoff.startCaller({
+            disclosureGiven: parameters.disclosure_given !== false,
+            callerName: preview.callerName,
+            requestedAction: preview.requestedAction || parameters.requested_action || "",
+          });
+        } catch (error) {
+          stopHandoffRingback();
+          callerHandoff.close(false);
+          callerHandoff = null;
+          handoffRelease = false;
+          throw error;
+        }
+        startHandoffRingback();
+        // The staff leg now exists. Only now release the agent, so setup errors
+        // leave the caller with the original conversation instead of dead air.
+        // Resolve the client tool first; closing inside the callback makes
+        // ElevenLabs record an abandoned tool execution.
+        handoffRelease = true;
+        const agentSession = current.session;
+        current.session = null;
+        setTimeout(() => Promise.resolve(agentSession?.endSession()).catch(() => {}), 250);
         return { status: "ringing" };
       }
 
@@ -700,7 +731,7 @@
         call = {
           id: crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
           contact, line, status: "connecting", seq: 0, transcript: [], muted: false, mode: null,
-          conversationId: null, session: null, connectedAt: 0, keypad: false, digits: "", timers: [], over: false,
+          conversationId: null, session: null, connectedAt: 0, keypad: false, digits: "", timers: [], over: false, route: null,
         };
         screen.classList.add("on-call");
         $("view-call").inert = false;
@@ -735,6 +766,7 @@
               assess_call_browser: async (parameters = {}) => {
                 const callerTurns = current.transcript.filter((turn) => turn.role === "user");
                 const text = callerTurns.map((turn) => turn.message).join(" ");
+                const riskLevel = String(parameters.risk_level || "").toLowerCase();
                 const response = await fetch("/tool/assess", {
                   method: "POST",
                   headers: { "content-type": "application/json" },
@@ -746,10 +778,13 @@
                     requested_action: parameters.requested_action || text,
                     transcript: Array.isArray(parameters.transcript) && parameters.transcript.length ? parameters.transcript : callerTurns,
                     proposed_action: parameters.proposed_action || null,
+                    risk_level: riskLevel || null,
                   }),
                 });
                 const decision = await response.json();
                 if (!response.ok) throw new Error(decision.error || "Policy service unavailable");
+                current.route = decision.risk_level || riskLevel || current.route;
+                publish(current);
                 return decision;
               },
               transfer_to_human: async (parameters = {}) => startStaffHandoff(current, parameters),
@@ -780,8 +815,6 @@
               publish(current);
             },
             onIncomingEvent: (event) => ingestLiveTurn(current, normalizeIncomingSocketEvent(event)),
-            onDebug: (info) => ingestLiveTurn(current, normalizeDebugEvent(info)),
-            onAgentChatResponsePart: (part) => ingestLiveTurn(current, normalizeIncomingSocketEvent({ type: "agent_chat_response_part", text_response_part: part })),
             onMessage: (payload) => ingestLiveTurn(current, normalizeConversationMessage(payload)),
             onAgentResponseCorrection: ({ original_agent_response: original, corrected_agent_response: corrected }) => {
               const turn = [...current.transcript].reverse().find((item) => item.role === "agent" && item.message === original);
@@ -812,20 +845,21 @@
 
       function ingestLiveTurn(current, turn) {
         if (!turn || current.over) return;
-        const previous = current.transcript;
-        const next = applyLiveTurn(previous, turn);
-        if (next === previous) return;
-        current.transcript = next;
-        publish(current);
+        try {
+          const previous = current.transcript;
+          const next = applyLiveTurn(previous, turn);
+          if (next === previous) return;
+          current.transcript = next;
+          publish(current);
+        } catch (error) {
+          console.warn("[phone] transcript", error);
+        }
       }
 
       function markConnected(current) {
         if (current.over || current.connectedAt) return;
         current.status = "connected";
         current.connectedAt = Date.now();
-        if (!current.transcript.length) {
-          current.transcript = applyLiveTurn([], { role: "agent", message: SOL_OPENING_LINE, eventId: "tentative-agent", pending: true });
-        }
         publish(current);
         renderCall();
       }
@@ -835,6 +869,7 @@
         current.over = true;
         current.endLabel = label;
         current.timers.forEach((timer) => { clearInterval(timer); clearTimeout(timer); });
+        stopHandoffRingback();
         stopTones();
         handoffRelease = false;
         const handoff = callerHandoff;
@@ -871,17 +906,20 @@
           callerNumber: MY_NUMBER,
           muted: current.muted,
           mode: current.mode,
+          riskLevel: current.route || null,
           transcript: liveTranscriptPayload(transcript),
         };
       }
       // Sends the whole call snapshot; the server keeps the newest by sequence number.
+      let publishQueue = Promise.resolve();
       function publish(current, { keepalive = false } = {}) {
         if (!current.line) return;
         current.seq += 1;
         let body = JSON.stringify(livePayload(current));
         // keepalive requests are capped at 64 KB, so trim a very long transcript on hang-up.
         if (keepalive && body.length > 60_000) body = JSON.stringify(livePayload(current, current.transcript.slice(-40)));
-        fetch(`/api/live/${current.line}`, { method: "POST", headers: { "content-type": "application/json" }, body, keepalive }).catch(() => {});
+        const snapshot = body;
+        publishQueue = publishQueue.then(() => fetch(`/api/live/${current.line}`, { method: "POST", headers: { "content-type": "application/json" }, body: snapshot, keepalive }).catch(() => {}));
       }
       addEventListener("pagehide", () => {
         if (!call || call.over || !call.line) return;
@@ -891,16 +929,18 @@
         navigator.sendBeacon(`/api/live/${call.line}`, new Blob([JSON.stringify(payload)], { type: "application/json" }));
       });
 
-      const monitorEvents = new EventSource("/api/monitor/events");
-      monitorEvents.addEventListener("signal", (event) => {
-        try { callerHandoff?.handleSignal(JSON.parse(event.data)); } catch {}
-      });
-      monitorEvents.addEventListener("hangup", (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          callerHandoff?.handleSignal({ ...payload, kind: "hangup", sessionId: payload.sessionId });
-        } catch {}
-      });
+      for (const line of ["studio-sol", "dental-clinic"]) {
+        const monitorEvents = new EventSource(`/api/monitor/${encodeURIComponent(line)}/events`);
+        monitorEvents.addEventListener("signal", (event) => {
+          try { callerHandoff?.handleSignal(JSON.parse(event.data)); } catch {}
+        });
+        monitorEvents.addEventListener("hangup", (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            callerHandoff?.handleSignal({ ...payload, kind: "hangup", sessionId: payload.sessionId });
+          } catch {}
+        });
+      }
 
       function toggleMute() {
         if (!call || call.over) return;

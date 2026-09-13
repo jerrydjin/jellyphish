@@ -5,6 +5,8 @@ import {
   applyLiveTurn,
   conversationListFingerprint,
   effectiveConversationStatus,
+  handoffSidecarTranscript,
+  humanOutcome,
   liveElapsedSeconds,
   normalizeConversationMessage,
   normalizeDebugEvent,
@@ -46,6 +48,20 @@ test("official ElevenLabs message payloads normalize into transcript turns", () 
   assert.equal(normalizeConversationMessage({ type: "audio", message: "noise" }), null);
 });
 
+test("duplicate callback feeds do not repeat an already-finalized utterance", () => {
+  let turns = applyLiveTurn([], { role: "user", message: "I need a haircut", eventId: 22, pending: false });
+  turns = applyLiveTurn(turns, { role: "agent", message: "What is your name?", eventId: 23, pending: false });
+  const duplicate = applyLiveTurn(turns, { role: "user", message: "I need a haircut", eventId: null, pending: false });
+  assert.strictEqual(duplicate, turns);
+  assert.equal(duplicate.filter((turn) => turn.message === "I need a haircut").length, 1);
+});
+
+test("a contained red call is never presented as a staff handoff", () => {
+  assert.equal(humanOutcome({ data: { outcome: "distracted no transfer" } }), "Call contained");
+  assert.equal(humanOutcome({ data: { outcome: "transfer denied" } }), "Call contained");
+  assert.equal(humanOutcome({ data: { outcome: "transferred" } }), "Handed to staff");
+});
+
 test("live assessment routes have explicit colour-state labels", () => {
   assert.deepEqual(routePresentation("green"), { route: "green", label: "Green · handoff" });
   assert.deepEqual(routePresentation("amber"), { route: "amber", label: "Amber · verify" });
@@ -80,10 +96,100 @@ test("partial transcripts update in place and finals replace them without droppi
   turns = applyLiveTurn(turns, { role: "user", message: "Hi I", eventId: 1, pending: true });
   turns = applyLiveTurn(turns, { role: "user", message: "Hi I need a cut", eventId: 1, pending: true });
   turns = applyLiveTurn(turns, { role: "user", message: "Hi I need a cut tomorrow", eventId: 2, pending: false });
-  turns = applyLiveTurn(turns, { role: "agent", message: "Thanks for calling Studio Sol.", eventId: 3, pending: false });
+  turns = applyLiveTurn(turns, { role: "agent", message: "Thanks for calling Barbershop.", eventId: 3, pending: false });
   assert.deepEqual(
     turns.map((turn) => `${turn.role}:${turn.pending ? "partial" : "final"}:${turn.message}`),
-    ["agent:final:Thanks for calling Studio Sol.", "user:final:Hi I need a cut tomorrow"],
+    ["agent:final:Thanks for calling Barbershop.", "user:final:Hi I need a cut tomorrow"],
+  );
+});
+
+test("late caller finals slot in before Sol speech that already arrived", () => {
+  let turns = applyLiveTurn([], {
+    role: "agent",
+    message: "Thanks for calling Barbershop, this is Konner. How can I help today?",
+    eventId: "opening",
+    pending: false,
+  });
+  turns = applyLiveTurn(turns, {
+    role: "agent",
+    message: "Of course, I can help you with that. May I please have your name?",
+    eventId: 10,
+    pending: false,
+  });
+  turns = applyLiveTurn(turns, {
+    role: "user",
+    message: "Hey there. I just want to book a haircut appointment for tomorrow, if that's all right.",
+    eventId: 11,
+    pending: false,
+  });
+  turns = applyLiveTurn(turns, { role: "user", message: "Uh, Jerry.", eventId: 12, pending: false });
+  turns = applyLiveTurn(turns, { role: "agent", message: "I'll put you through now.", eventId: 13, pending: false });
+  assert.deepEqual(
+    turns.map((turn) => `${turn.role}:${turn.message}`),
+    [
+      "agent:Thanks for calling Barbershop, this is Konner. How can I help today?",
+      "user:Hey there. I just want to book a haircut appointment for tomorrow, if that's all right.",
+      "agent:Of course, I can help you with that. May I please have your name?",
+      "user:Uh, Jerry.",
+      "agent:I'll put you through now.",
+    ],
+  );
+});
+
+test("the handoff panel keeps screening speech and appends staff/caller turns", () => {
+  const live = {
+    transcript: [
+      { role: "agent", message: "I'll put you through now." },
+      { role: "user", message: "Uh, Jerry." },
+    ],
+  };
+  assert.deepEqual(handoffSidecarTranscript({ transcript: [] }, live), {
+    source: "screening",
+    turns: [
+      { role: "agent", text: "I'll put you through now.", pending: false },
+      { role: "user", text: "Uh, Jerry.", pending: false },
+    ],
+  });
+  assert.deepEqual(
+    handoffSidecarTranscript(
+      {
+        transcript: [
+          { role: "staff", text: "Studio Sol, this is Alex." },
+          { role: "caller", text: "Hi, I booked a haircut for tomorrow." },
+        ],
+      },
+      live,
+    ),
+    {
+      source: "full",
+      turns: [
+        { role: "agent", text: "I'll put you through now.", pending: false },
+        { role: "user", text: "Uh, Jerry.", pending: false },
+        { role: "staff", text: "Studio Sol, this is Alex.", pending: false },
+        { role: "caller", text: "Hi, I booked a haircut for tomorrow.", pending: false },
+      ],
+    },
+  );
+  assert.equal(handoffSidecarTranscript({}, {}).source, "empty");
+});
+
+test("a later Sol reply does not overwrite the opening line", () => {
+  let turns = applyLiveTurn([], { role: "agent", message: "Thanks for calling Barbershop.", eventId: "tentative-agent", pending: true });
+  turns = applyLiveTurn(turns, { role: "user", message: "Haircut tomorrow for Jerry", eventId: 2, pending: false });
+  turns = applyLiveTurn(turns, { role: "agent", message: "I can help with that.", eventId: 3, pending: false });
+  assert.deepEqual(
+    turns.map((turn) => `${turn.role}:${turn.message}`),
+    ["agent:Thanks for calling Barbershop.", "user:Haircut tomorrow for Jerry", "agent:I can help with that."],
+  );
+});
+
+test("tool-call JSON is not shown as spoken Sol text", () => {
+  assert.equal(
+    normalizeIncomingSocketEvent({
+      type: "internal_tentative_agent_response",
+      tentative_agent_response_internal_event: { tentative_agent_response: '{"name":"assess_call_browser"}' },
+    }),
+    null,
   );
 });
 

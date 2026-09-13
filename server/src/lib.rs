@@ -24,7 +24,7 @@ use db::now_millis;
 use elevenlabs::ElevenLabsClient;
 use futures_util::{StreamExt, stream};
 use live::{LiveHub, LiveSnapshot, LiveUpdate};
-use monitor::{HandoffRoom, MonitorHub, MonitorSnapshot};
+use monitor::{HandoffRoom, MonitorHub, MonitorSnapshot, RingParams};
 use risk_core::{CallerContext, RiskDecision, RiskLevel, TranscriptTurn, evaluate};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -68,14 +68,21 @@ pub fn router(state: AppState) -> Router {
         .route("/api/summaries", get(summaries))
         .route("/api/conversations", get(conversations))
         .route("/api/conversations/{id}", get(conversation))
-        .route("/api/monitor/events", get(monitor_events))
-        .route("/api/monitor/state", get(monitor_state))
-        .route("/api/monitor/demo", post(monitor_demo))
-        .route("/api/handoff/ring", post(handoff_ring))
-        .route("/api/handoff/signal", post(handoff_signal))
-        .route("/api/handoff/hangup", post(handoff_hangup))
-        .route("/api/handoff/transcript", post(handoff_local_transcript))
-        .route("/api/handoff/{id}", get(handoff_room))
+        .route("/api/monitor/{line}/events", get(monitor_events))
+        .route("/api/monitor/{line}/state", get(monitor_state))
+        .route("/api/monitor/{line}/demo", post(monitor_demo))
+        .route("/api/handoff/{line}/ring", post(handoff_ring))
+        .route("/api/handoff/{line}/signal", post(handoff_signal))
+        .route("/api/handoff/{line}/hangup", post(handoff_hangup))
+        .route(
+            "/api/handoff/{line}/transcript",
+            post(handoff_local_transcript),
+        )
+        .route(
+            "/api/handoff/{line}/transcribe",
+            post(handoff_transcribe_audio),
+        )
+        .route("/api/handoff/{line}/{id}", get(handoff_room))
         .route("/api/live/{line}", get(live_state).post(live_update))
         .route("/api/live/{line}/events", get(live_events))
         .route("/api/webhooks/handoff", post(monitor_handoff))
@@ -92,6 +99,10 @@ async fn health(State(state): State<AppState>) -> Json<Value> {
         "ok": true,
         "service": "jellyphish-rust",
         "agentId": state.config.elevenlabs_agent_id,
+        "lines": {
+            "studio-sol": { "agentId": state.config.elevenlabs_agent_id },
+            "dental-clinic": { "agentId": state.config.elevenlabs_dental_agent_id },
+        },
         "apiConfigured": state.elevenlabs.configured(),
         "elevenLabsWebhookConfigured": state.config.elevenlabs_webhook_secret.is_some(),
         "monitorWebhookConfigured": state.config.monitor_webhook_secret.is_some(),
@@ -166,6 +177,11 @@ async fn finish(
 }
 
 #[derive(Deserialize)]
+struct ConversationListQuery {
+    agent_id: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct SummaryQuery {
     limit: Option<i64>,
 }
@@ -179,8 +195,18 @@ async fn summaries(
     ))
 }
 
-async fn conversations(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let mut value = state.elevenlabs.conversations().await?;
+async fn conversations(
+    State(state): State<AppState>,
+    Query(query): Query<ConversationListQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let agent_id = query.agent_id.as_deref();
+    if let Some(id) = agent_id {
+        let dental = state.config.elevenlabs_dental_agent_id.as_deref();
+        if id != state.config.elevenlabs_agent_id && dental != Some(id) {
+            return Err(ApiError::bad_request("unknown agent_id"));
+        }
+    }
+    let mut value = state.elevenlabs.conversations(agent_id).await?;
     let summaries = state.store.summaries(100).await?;
     if let Some(items) = value["conversations"].as_array_mut() {
         for item in items {
@@ -215,9 +241,20 @@ async fn conversation(
             })
         })
         .collect();
+    let risk_level = parse_risk_level(&value["data"]["route"]);
     let decision = evaluate(&CallerContext {
-        call_id: id,
+        call_id: id.clone(),
+        requested_action: value["data"]["requested_action"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
+        claimed_company: value["data"]["claimed_company"]
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
         transcript,
+        risk_level,
         ..Default::default()
     });
     value["policy"] = serde_json::to_value(decision)?;
@@ -278,6 +315,10 @@ async fn elevenlabs_post_call(
                 "claimed_company",
             )),
             transcript,
+            risk_level: parse_risk_level(&json!(collection_value(
+                &event["data"]["analysis"]["data_collection_results"],
+                "route",
+            ))),
             ..Default::default()
         };
         let decision = evaluate(&context);
@@ -302,6 +343,8 @@ async fn elevenlabs_post_call(
 
 #[derive(Debug, Deserialize, serde::Serialize)]
 struct HandoffPayload {
+    #[serde(default = "default_line")]
+    line: String,
     session_id: String,
     #[serde(default)]
     disclosure_given: bool,
@@ -309,6 +352,8 @@ struct HandoffPayload {
 
 #[derive(Debug, Deserialize, serde::Serialize)]
 struct TranscriptPayload {
+    #[serde(default = "default_line")]
+    line: String,
     session_id: String,
     sequence: Option<i64>,
     role: String,
@@ -317,6 +362,8 @@ struct TranscriptPayload {
 
 #[derive(Debug, Deserialize, serde::Serialize)]
 struct FailurePayload {
+    #[serde(default = "default_line")]
+    line: String,
     session_id: String,
     #[serde(default = "default_failure")]
     reason: String,
@@ -326,6 +373,10 @@ fn default_failure() -> String {
     "Monitoring sidecar unavailable".to_owned()
 }
 
+fn default_line() -> String {
+    "studio-sol".to_owned()
+}
+
 async fn monitor_handoff(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -333,8 +384,10 @@ async fn monitor_handoff(
 ) -> Result<(StatusCode, Json<MonitorSnapshot>), ApiError> {
     verify_monitor_request(&state, &headers, &body)?;
     let payload: HandoffPayload = serde_json::from_slice(&body)?;
+    known_line(&payload.line)?;
     require_session(&payload.session_id)?;
     let session = state.monitor.write().await.begin(
+        payload.line.clone(),
         payload.session_id.clone(),
         payload.disclosure_given,
         "verified-webhook",
@@ -348,7 +401,10 @@ async fn monitor_handoff(
             None,
         )
         .await?;
-    Ok((StatusCode::ACCEPTED, Json(MonitorSnapshot::Active(session))))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(MonitorSnapshot::Active(Box::new(session))),
+    ))
 }
 
 async fn monitor_transcript(
@@ -358,8 +414,10 @@ async fn monitor_transcript(
 ) -> Result<(StatusCode, Json<MonitorSnapshot>), ApiError> {
     verify_monitor_request(&state, &headers, &body)?;
     let payload: TranscriptPayload = serde_json::from_slice(&body)?;
+    known_line(&payload.line)?;
     require_session(&payload.session_id)?;
     let session = state.monitor.write().await.ingest(
+        payload.line.clone(),
         payload.session_id.clone(),
         payload.sequence,
         payload.role.clone(),
@@ -375,7 +433,10 @@ async fn monitor_transcript(
             None,
         )
         .await?;
-    Ok((StatusCode::ACCEPTED, Json(MonitorSnapshot::Active(session))))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(MonitorSnapshot::Active(Box::new(session))),
+    ))
 }
 
 async fn monitor_failure(
@@ -385,8 +446,10 @@ async fn monitor_failure(
 ) -> Result<(StatusCode, Json<MonitorSnapshot>), ApiError> {
     verify_monitor_request(&state, &headers, &body)?;
     let payload: FailurePayload = serde_json::from_slice(&body)?;
+    known_line(&payload.line)?;
     require_session(&payload.session_id)?;
     let session = state.monitor.write().await.fail(
+        payload.line.clone(),
         payload.session_id.clone(),
         payload.reason.clone(),
         "verified-webhook",
@@ -400,20 +463,32 @@ async fn monitor_failure(
             None,
         )
         .await?;
-    Ok((StatusCode::ACCEPTED, Json(MonitorSnapshot::Active(session))))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(MonitorSnapshot::Active(Box::new(session))),
+    ))
 }
 
-async fn monitor_state(State(state): State<AppState>) -> Json<MonitorSnapshot> {
-    Json(state.monitor.read().await.snapshot())
+async fn monitor_state(
+    State(state): State<AppState>,
+    Path(line): Path<String>,
+) -> Result<Json<MonitorSnapshot>, ApiError> {
+    known_line(&line)?;
+    Ok(Json(state.monitor.read().await.snapshot(&line)))
 }
 
-async fn monitor_demo(State(state): State<AppState>) -> (StatusCode, Json<MonitorSnapshot>) {
+async fn monitor_demo(
+    State(state): State<AppState>,
+    Path(line): Path<String>,
+) -> Result<(StatusCode, Json<MonitorSnapshot>), ApiError> {
+    known_line(&line)?;
     let session_id = format!("demo_{}", now_millis());
-    let session = state
-        .monitor
-        .write()
-        .await
-        .begin(session_id.clone(), true, "local-demo");
+    let session =
+        state
+            .monitor
+            .write()
+            .await
+            .begin(line.clone(), session_id.clone(), true, "local-demo");
     let monitor = state.monitor.clone();
     tokio::spawn(async move {
         let turns = [
@@ -437,6 +512,7 @@ async fn monitor_demo(State(state): State<AppState>) -> (StatusCode, Json<Monito
         for (sequence, (delay, role, text)) in turns.into_iter().enumerate() {
             tokio::time::sleep(Duration::from_millis(delay)).await;
             let _ = monitor.write().await.ingest(
+                line.clone(),
                 session_id.clone(),
                 Some(sequence as i64),
                 role.to_owned(),
@@ -445,7 +521,10 @@ async fn monitor_demo(State(state): State<AppState>) -> (StatusCode, Json<Monito
             );
         }
     });
-    (StatusCode::ACCEPTED, Json(MonitorSnapshot::Active(session)))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(MonitorSnapshot::Active(Box::new(session))),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -455,6 +534,7 @@ struct RingRequest {
     disclosure_given: bool,
     caller_name: Option<String>,
     requested_action: Option<String>,
+    caption_key: String,
     offer: Value,
 }
 
@@ -479,21 +559,25 @@ fn default_from() -> String {
 
 async fn handoff_ring(
     State(state): State<AppState>,
+    Path(line): Path<String>,
     Json(request): Json<RingRequest>,
 ) -> Result<(StatusCode, Json<HandoffRoom>), ApiError> {
+    known_line(&line)?;
     require_session(&request.session_id)?;
     let room = state
         .monitor
         .write()
         .await
-        .ring(
-            request.session_id.clone(),
-            request.disclosure_given,
-            request.caller_name.clone(),
-            request.requested_action.clone(),
-            request.offer,
-            "browser-handoff",
-        )
+        .ring(RingParams {
+            line,
+            session_id: request.session_id.clone(),
+            disclosure_given: request.disclosure_given,
+            caller_name: request.caller_name.clone(),
+            requested_action: request.requested_action.clone(),
+            caption_key: request.caption_key,
+            offer: request.offer,
+            source: "browser-handoff",
+        })
         .map_err(handoff_error)?;
     state
         .store
@@ -513,14 +597,17 @@ async fn handoff_ring(
 
 async fn handoff_signal(
     State(state): State<AppState>,
+    Path(line): Path<String>,
     Json(request): Json<SignalRequest>,
 ) -> Result<(StatusCode, Json<HandoffRoom>), ApiError> {
+    known_line(&line)?;
     require_session(&request.session_id)?;
     let room = state
         .monitor
         .write()
         .await
         .signal(
+            line,
             request.session_id,
             request.from,
             request.kind,
@@ -532,14 +619,16 @@ async fn handoff_signal(
 
 async fn handoff_hangup(
     State(state): State<AppState>,
+    Path(line): Path<String>,
     Json(request): Json<HangupRequest>,
 ) -> Result<(StatusCode, Json<HandoffRoom>), ApiError> {
+    known_line(&line)?;
     require_session(&request.session_id)?;
     let room = state
         .monitor
         .write()
         .await
-        .hangup(request.session_id.clone(), &request.from)
+        .hangup(line, request.session_id.clone(), &request.from)
         .map_err(handoff_error)?;
     state
         .store
@@ -555,14 +644,28 @@ async fn handoff_hangup(
 
 async fn handoff_local_transcript(
     State(state): State<AppState>,
+    Path(line): Path<String>,
+    headers: HeaderMap,
     Json(payload): Json<TranscriptPayload>,
 ) -> Result<(StatusCode, Json<MonitorSnapshot>), ApiError> {
+    known_line(&line)?;
     require_session(&payload.session_id)?;
+    if !state.monitor.read().await.accepts_captions(
+        &line,
+        &payload.session_id,
+        header(&headers, "x-caption-key").unwrap_or_default(),
+    ) {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            "handoff is not connected".to_owned(),
+        ));
+    }
     let session = state
         .monitor
         .write()
         .await
         .ingest(
+            line,
             payload.session_id.clone(),
             payload.sequence,
             payload.role.clone(),
@@ -570,19 +673,90 @@ async fn handoff_local_transcript(
             "browser-handoff",
         )
         .map_err(handoff_error)?;
-    Ok((StatusCode::ACCEPTED, Json(MonitorSnapshot::Active(session))))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(MonitorSnapshot::Active(Box::new(session))),
+    ))
+}
+
+async fn handoff_transcribe_audio(
+    State(state): State<AppState>,
+    Path(line): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    known_line(&line)?;
+    let session_id = header(&headers, "x-session-id").unwrap_or_default();
+    let role = header(&headers, "x-role").unwrap_or_default();
+    require_session(session_id)?;
+    if !matches!(role, "caller" | "staff") {
+        return Err(ApiError::bad_request("role must be caller or staff"));
+    }
+    if !state.monitor.read().await.accepts_captions(
+        &line,
+        session_id,
+        header(&headers, "x-caption-key").unwrap_or_default(),
+    ) {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            "handoff is not connected".to_owned(),
+        ));
+    }
+    if body.len() < 200 {
+        return Ok((StatusCode::OK, Json(json!({ "text": "" }))));
+    }
+    if !state.elevenlabs.configured() {
+        return Err(ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "speech-to-text is not configured".to_owned(),
+        ));
+    }
+    let content_type = header(&headers, "content-type").unwrap_or("application/octet-stream");
+    let extension = if content_type.contains("webm") {
+        "webm"
+    } else if content_type.contains("mp4") {
+        "mp4"
+    } else {
+        "audio"
+    };
+    let text = state
+        .elevenlabs
+        .transcribe_audio(body.to_vec(), content_type, &format!("speech.{extension}"))
+        .await
+        .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.to_string()))?;
+    if text.is_empty() {
+        return Ok((StatusCode::OK, Json(json!({ "text": "" }))));
+    }
+    let session = state
+        .monitor
+        .write()
+        .await
+        .ingest(
+            line,
+            session_id.to_owned(),
+            None,
+            role.to_owned(),
+            text.clone(),
+            "browser-handoff",
+        )
+        .map_err(handoff_error)?;
+    Ok((
+        StatusCode::OK,
+        Json(json!({ "text": text, "snapshot": session })),
+    ))
 }
 
 async fn handoff_room(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path((line, id)): Path<(String, String)>,
 ) -> Result<Json<HandoffRoom>, ApiError> {
+    known_line(&line)?;
     require_session(&id)?;
     state
         .monitor
         .read()
         .await
-        .room(&id)
+        .room(&line, &id)
         .map(Json)
         .ok_or_else(|| {
             ApiError(
@@ -664,22 +838,29 @@ async fn live_events(
 
 async fn monitor_events(
     State(state): State<AppState>,
-) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
+    Path(line): Path<String>,
+) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    known_line(&line)?;
     let (snapshot, receiver) = {
         let hub = state.monitor.read().await;
         (
-            serde_json::to_string(&hub.snapshot())
+            serde_json::to_string(&hub.snapshot(&line))
                 .unwrap_or_else(|_| "{\"status\":\"idle\"}".to_owned()),
             hub.subscribe(),
         )
     };
     let initial = stream::once(async move { Ok(Event::default().event("monitor").data(snapshot)) });
-    let updates = BroadcastStream::new(receiver).filter_map(|message| async move {
-        message
-            .ok()
-            .map(|(event, data)| Ok(Event::default().event(event).data(data)))
+    let updates = BroadcastStream::new(receiver).filter_map(move |message| {
+        let line = line.clone();
+        async move {
+            message
+                .ok()
+                .filter(|(event_line, _, _)| *event_line == line)
+                .map(|(_, event, data)| Ok(Event::default().event(event).data(data)))
+        }
     });
-    Sse::new(initial.chain(updates)).keep_alive(KeepAlive::new().interval(Duration::from_secs(20)))
+    Ok(Sse::new(initial.chain(updates))
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(20))))
 }
 
 fn verify_monitor_request(
@@ -729,6 +910,17 @@ fn collection_value(raw: &Value, key: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_owned()
+}
+
+fn parse_risk_level(value: &Value) -> Option<RiskLevel> {
+    serde_json::from_value(value.clone()).ok().or_else(|| {
+        value
+            .as_str()
+            .or_else(|| value.get("value").and_then(Value::as_str))
+            .and_then(|raw| {
+                serde_json::from_str(&format!("\"{}\"", raw.trim().to_ascii_lowercase())).ok()
+            })
+    })
 }
 
 fn non_empty_value(value: String) -> Option<String> {
@@ -790,6 +982,7 @@ mod tests {
             web_root: std::path::PathBuf::from("../web"),
             elevenlabs_api_key: None,
             elevenlabs_agent_id: "test-agent".to_owned(),
+            elevenlabs_dental_agent_id: None,
             elevenlabs_webhook_secret: None,
             monitor_webhook_secret: monitor_secret.map(str::to_owned),
             tool_api_key: None,
@@ -820,7 +1013,7 @@ mod tests {
         let response = test_app().await.oneshot(
             Request::post("/tool/assess")
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"call_id":"test-1","requested_action":"Install TeamViewer for remote access","proposed_action":"transfer"}"#))
+                .body(Body::from(r#"{"call_id":"test-1","risk_level":"red","requested_action":"Install TeamViewer for remote access","proposed_action":"transfer"}"#))
                 .unwrap(),
         ).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -837,7 +1030,7 @@ mod tests {
         let response = test_app().await.oneshot(
             Request::post("/tool/assess")
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"call_id":"test-2","claimed_company":"North Star Hair Supply","business_caller":true,"known_contact":true,"verified_reference":true,"requested_action":"speak to the owner about a delivery","proposed_action":"transfer"}"#))
+                .body(Body::from(r#"{"call_id":"test-2","risk_level":"amber","claimed_company":"North Star Hair Supply","business_caller":true,"known_contact":true,"verified_reference":true,"requested_action":"speak to the owner about a delivery","proposed_action":"transfer"}"#))
                 .unwrap(),
         ).await.unwrap();
         let body: Value =
@@ -884,7 +1077,7 @@ mod tests {
 
         let response = app
             .oneshot(
-                Request::get("/api/monitor/state")
+                Request::get("/api/monitor/studio-sol/state")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -950,6 +1143,7 @@ mod tests {
         assert_eq!(body["call"]["callerNumber"], "+61 400 000 000");
         assert!(body["call"]["startedAt"].is_i64());
         assert_eq!(body["call"]["transcript"].as_array().unwrap().len(), 1);
+        assert!(body["call"]["riskLevel"].is_null());
 
         // Out-of-order snapshots are dropped.
         assert_eq!(
@@ -1007,6 +1201,35 @@ mod tests {
         assert_eq!(snapshot["call"]["transcript"][0]["pending"], true);
         assert_eq!(snapshot["call"]["transcript"][1]["message"], "Hi I need a");
         assert_eq!(snapshot["call"]["transcript"][1]["pending"], true);
+        assert!(snapshot["call"]["riskLevel"].is_null());
+    }
+
+    #[tokio::test]
+    async fn live_snapshot_relays_the_agents_route() {
+        let app = test_app().await;
+        let body = json!({
+            "callId": "scam-1",
+            "seq": 1,
+            "status": "connected",
+            "riskLevel": "red",
+            "transcript": [{
+                "role": "user",
+                "message": "I'm calling from Microsoft tech support. Please pay them now."
+            }]
+        });
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/live/studio-sol")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let snapshot = live_snapshot(&app).await;
+        assert_eq!(snapshot["call"]["riskLevel"], "red");
     }
 
     #[tokio::test]
@@ -1034,12 +1257,13 @@ mod tests {
             "disclosure_given": true,
             "caller_name": "Jamie",
             "requested_action": "haircut tomorrow",
+            "caption_key": "caption-secret-1",
             "offer": { "type": "offer", "sdp": "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n" }
         });
         let response = app
             .clone()
             .oneshot(
-                Request::post("/api/handoff/ring")
+                Request::post("/api/handoff/studio-sol/ring")
                     .header("content-type", "application/json")
                     .body(Body::from(ring.to_string()))
                     .unwrap(),
@@ -1051,7 +1275,7 @@ mod tests {
         let state = app
             .clone()
             .oneshot(
-                Request::get("/api/monitor/state")
+                Request::get("/api/monitor/studio-sol/state")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -1062,6 +1286,31 @@ mod tests {
         assert_eq!(body["handoffStatus"], "ringing");
         assert_eq!(body["aiMuted"], true);
 
+        let dental = app
+            .clone()
+            .oneshot(
+                Request::get("/api/monitor/dental-clinic/state")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let dental: Value =
+            serde_json::from_slice(&to_bytes(dental.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(dental["status"], "idle");
+
+        let wrong_line = app
+            .clone()
+            .oneshot(
+                Request::get("/api/handoff/dental-clinic/conv_staff_1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(wrong_line.status(), StatusCode::NOT_FOUND);
+
         let answer = serde_json::json!({
             "session_id": "conv_staff_1",
             "from": "staff",
@@ -1071,7 +1320,7 @@ mod tests {
         let response = app
             .clone()
             .oneshot(
-                Request::post("/api/handoff/signal")
+                Request::post("/api/handoff/studio-sol/signal")
                     .header("content-type", "application/json")
                     .body(Body::from(answer.to_string()))
                     .unwrap(),
@@ -1082,7 +1331,7 @@ mod tests {
 
         let connected = app
             .oneshot(
-                Request::get("/api/monitor/state")
+                Request::get("/api/monitor/studio-sol/state")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -1092,5 +1341,162 @@ mod tests {
             serde_json::from_slice(&to_bytes(connected.into_body(), 64 * 1024).await.unwrap())
                 .unwrap();
         assert_eq!(body["handoffStatus"], "connected");
+    }
+
+    #[tokio::test]
+    async fn browser_handoff_keeps_staff_and_caller_captions() {
+        let app = test_app().await;
+        let ring = serde_json::json!({
+            "session_id": "conv_staff_2",
+            "disclosure_given": true,
+            "caption_key": "caption-secret-2",
+            "offer": { "type": "offer", "sdp": "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n" }
+        });
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/handoff/studio-sol/ring")
+                    .header("content-type", "application/json")
+                    .body(Body::from(ring.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let answer = serde_json::json!({
+            "session_id": "conv_staff_2",
+            "from": "staff",
+            "kind": "answer",
+            "payload": { "type": "answer", "sdp": "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n" }
+        });
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/handoff/studio-sol/signal")
+                    .header("content-type", "application/json")
+                    .body(Body::from(answer.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+        let first = serde_json::json!({
+            "session_id": "conv_staff_2",
+            "role": "staff",
+            "text": "Studio Sol, this is Alex."
+        });
+        let rejected = app
+            .clone()
+            .oneshot(
+                Request::post("/api/handoff/studio-sol/transcript")
+                    .header("content-type", "application/json")
+                    .header("x-caption-key", "wrong-secret")
+                    .body(Body::from(first.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::CONFLICT);
+        for _ in 0..2 {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post("/api/handoff/studio-sol/transcript")
+                        .header("content-type", "application/json")
+                        .header("x-caption-key", "caption-secret-2")
+                        .body(Body::from(first.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::ACCEPTED);
+        }
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/handoff/studio-sol/transcript")
+                    .header("content-type", "application/json")
+                    .header("x-caption-key", "caption-secret-2")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "session_id": "conv_staff_2",
+                            "role": "caller",
+                            "text": "Hi, I booked a haircut."
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+        let state = app
+            .clone()
+            .oneshot(
+                Request::get("/api/monitor/studio-sol/state")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body: Value =
+            serde_json::from_slice(&to_bytes(state.into_body(), 64 * 1024).await.unwrap()).unwrap();
+        assert_eq!(body["transcript"].as_array().unwrap().len(), 2);
+        assert_eq!(body["transcript"][0]["role"], "staff");
+        assert_eq!(body["transcript"][1]["role"], "caller");
+
+        let silent = app
+            .clone()
+            .oneshot(
+                Request::post("/api/handoff/studio-sol/transcribe")
+                    .header("x-session-id", "conv_staff_2")
+                    .header("x-role", "staff")
+                    .header("x-caption-key", "caption-secret-2")
+                    .header("content-type", "audio/webm")
+                    .body(Body::from(vec![1, 2, 3, 4]))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(silent.status(), StatusCode::OK);
+
+        let hangup = app
+            .clone()
+            .oneshot(
+                Request::post("/api/handoff/studio-sol/hangup")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "session_id": "conv_staff_2",
+                            "from": "caller"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(hangup.status(), StatusCode::ACCEPTED);
+
+        let final_caption = app
+            .oneshot(
+                Request::post("/api/handoff/studio-sol/transcript")
+                    .header("content-type", "application/json")
+                    .header("x-caption-key", "caption-secret-2")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "session_id": "conv_staff_2",
+                            "role": "caller",
+                            "text": "Thanks, goodbye."
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(final_caption.status(), StatusCode::ACCEPTED);
     }
 }

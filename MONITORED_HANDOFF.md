@@ -14,7 +14,7 @@ Caller -> ElevenLabs -> conference transfer -> human
                                                +-> SSE dashboard alert
 ```
 
-Browser demos use a second path: after Sol gives the disclosure and calls `transfer_to_human`, the caller tab posts a WebRTC offer to `/api/handoff/ring`. The operator console on the home page rings like a staff line. Answering connects caller audio to the human, and live caller/staff speech writes into the same transcript panel.
+Browser demos use a second path: after the assistant gives the disclosure and calls `transfer_to_human`, the caller tab posts a WebRTC offer to `/api/handoff/{line}/ring`. The operator console for that business line rings like a staff line. Answering connects caller audio to the human, and live caller/staff speech writes into the same transcript panel. Handoff state and events are isolated by line, so the dental and barbershop consoles cannot answer one another's calls.
 
 ## Webhook contract
 
@@ -35,17 +35,19 @@ The service rejects missing, malformed, mismatched, and more-than-five-minute-ol
 
 Local demo endpoints do not require HMAC:
 
-- `POST /api/handoff/ring`: SDP offer plus caller preview
-- `POST /api/handoff/signal`: SDP answer or ICE
-- `POST /api/handoff/transcript`: live caller/staff speech
-- `POST /api/handoff/hangup`
-- `GET /api/handoff/{id}`
+- `POST /api/handoff/{line}/ring`: SDP offer plus caller preview and a per-call caption capability
+- `POST /api/handoff/{line}/signal`: SDP answer or ICE
+- `POST /api/handoff/{line}/transcript`: live caller/staff speech; requires the caption capability and a connected or just-ended room
+- `POST /api/handoff/{line}/transcribe`: bounded speech audio; requires the caption capability and a connected or just-ended room
+- `POST /api/handoff/{line}/hangup`
+- `GET /api/monitor/{line}/events`: line-scoped operator event stream
+- `GET /api/handoff/{line}/{id}`
 
 Open the operator console on one tab or machine, and the demo caller at `/phone/` on another. When Sol hands off, pick up on the home page.
 
 ## Safety behavior
 
-- `risk-core` assesses caller transcript chunks with the same rules used by `assess_call`.
+- `risk-core` can raise a post-handoff alert from transcript chunks; it does not re-classify the original screening route.
 - The AI is marked silent after handoff.
 - Alerts carry the triggering evidence and a fixed recommended action.
 - Monitoring failure sets `monitorStatus` to `degraded` and preserves `handoffStatus: connected`.

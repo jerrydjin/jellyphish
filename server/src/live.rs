@@ -3,6 +3,7 @@
 //! whole call snapshot here and every dashboard for that line mirrors it.
 
 use crate::db::now_millis;
+use risk_core::RiskLevel;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::broadcast;
@@ -40,6 +41,8 @@ pub struct LiveUpdate {
     pub mode: Option<String>,
     #[serde(default)]
     pub transcript: Vec<LiveTurn>,
+    #[serde(rename = "riskLevel", default)]
+    pub risk_level: Option<RiskLevel>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -55,6 +58,8 @@ pub struct LiveCall {
     pub muted: bool,
     pub mode: Option<String>,
     pub transcript: Vec<LiveTurn>,
+    #[serde(rename = "riskLevel")]
+    pub risk_level: Option<RiskLevel>,
     #[serde(rename = "startedAt")]
     pub started_at: Option<i64>,
     #[serde(rename = "endedAt")]
@@ -140,7 +145,7 @@ impl LiveHub {
         let mut transcript: Vec<LiveTurn> = update
             .transcript
             .into_iter()
-            .filter(|turn| matches!(turn.role.as_str(), "user" | "agent"))
+            .filter(|turn| matches!(turn.role.as_str(), "user" | "agent" | "staff" | "caller"))
             .map(|turn| LiveTurn {
                 role: turn.role,
                 message: clip(turn.message.trim(), MAX_MESSAGE_CHARS),
@@ -152,6 +157,9 @@ impl LiveHub {
             transcript.drain(..transcript.len() - MAX_TURNS);
         }
 
+        let risk_level = update
+            .risk_level
+            .or_else(|| previous.and_then(|call| call.risk_level));
         let connected = update.status == "connected";
         let ended = update.status == "ended";
         let started_at = previous
@@ -170,6 +178,7 @@ impl LiveHub {
                 .mode
                 .filter(|mode| matches!(mode.as_str(), "listening" | "speaking")),
             transcript,
+            risk_level,
             started_at,
             ended_at: ended.then_some(now),
             updated_at: now,

@@ -61,6 +61,8 @@ pub struct CallerContext {
     #[serde(default)]
     pub signals: Vec<RiskSignal>,
     pub proposed_action: Option<AllowedAction>,
+    /// The voice agent's silent classification. This is the authority for routing.
+    pub risk_level: Option<RiskLevel>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,12 +88,12 @@ struct Patterns {
 fn patterns() -> &'static Patterns {
     static PATTERNS: OnceLock<Patterns> = OnceLock::new();
     PATTERNS.get_or_init(|| Patterns {
-        payment: Regex::new(r"(?i)(bank|payment|account|invoice|refund|settlement).{0,70}(change|changed|update|replace|redirect|different)|(change|changed|update|replace|redirect).{0,70}(bank|payment|account|invoice|refund|settlement)").unwrap(),
+        payment: Regex::new(r"(?i)(bank|payment|account|invoice|refund|settlement).{0,70}(change|changed|update|replace|redirect|different)|(change|changed|update|replace|redirect).{0,70}(bank|payment|account|invoice|refund|settlement)|gift[- ]cards?|(unpaid|outstanding|not paid|missing).{0,50}(subscription|invoice|payment|office)|(subscription|office).{0,40}(not paid|unpaid)|(?:pay|send|buy).{0,45}gift|pay them now|owes?\b.{0,40}\$|\$\s*\d[\d,]*.{0,40}(subscription|unpaid|not paid|owe|debt|payment)").unwrap(),
         credential: Regex::new(r"(?i)password|passcode|verification code|security code|one[- ]time code|\botp\b|\bmfa\b|multi[- ]factor|login code").unwrap(),
-        remote_access: Regex::new(r"(?i)remote access|remote support|screen share|anydesk|teamviewer|logmein|install.{0,35}(support|software|tool|app)").unwrap(),
+        remote_access: Regex::new(r"(?i)remote access|remote support|remote desktop|screen share|anydesk|teamviewer|logmein|connect(?:ed)? to (?:your|the) (?:computer|pc|system)|install.{0,35}(support|software|tool|app)").unwrap(),
         urgency: Regex::new(r"(?i)(must|have to|need to).{0,35}(today|now|immediately|right away)|urgent|immediately|right now|today only|final warning|act now|otherwise.{0,45}(suspend|close|cancel|penalty|fee|lose access)").unwrap(),
         protected_information: Regex::new(r"(?i)staff (schedule|availability|phone|number)|customer (booking|record)|invoice detail|private record|security procedure").unwrap(),
-        business_caller: Regex::new(r"(?i)supplier|delivery|purchase order|invoice|provider|support department|technician").unwrap(),
+        business_caller: Regex::new(r"(?i)supplier|delivery|purchase order|invoice|provider|support department|technician|tech(?:nical)? support|microsoft|help ?desk|pos (?:provider|support|vendor)").unwrap(),
     })
 }
 
@@ -141,23 +143,9 @@ pub fn detect_signals(context: &CallerContext) -> BTreeSet<RiskSignal> {
 }
 
 pub fn evaluate(context: &CallerContext) -> RiskDecision {
-    let signals = detect_signals(context);
-    let red = signals.iter().any(|signal| {
-        matches!(
-            signal,
-            RiskSignal::PaymentOrAccountChange
-                | RiskSignal::CredentialOrMfaRequest
-                | RiskSignal::RemoteAccessRequest
-                | RiskSignal::CoerciveUrgency
-        )
-    });
-    let risk_level = if red {
-        RiskLevel::Red
-    } else if signals.is_empty() {
-        RiskLevel::Green
-    } else {
-        RiskLevel::Amber
-    };
+    let signals: BTreeSet<_> = context.signals.iter().copied().collect();
+    // The agent is the judge. With no classification yet, fail closed: no transfer.
+    let risk_level = context.risk_level.unwrap_or(RiskLevel::Amber);
 
     let allowed_actions = match risk_level {
         RiskLevel::Green => vec![
@@ -174,7 +162,6 @@ pub fn evaluate(context: &CallerContext) -> RiskDecision {
         RiskLevel::Red => vec![
             AllowedAction::SafeRefusal,
             AllowedAction::BoundedDistraction,
-            AllowedAction::EndCall,
         ],
     };
     let transfer_allowed = allowed_actions.contains(&AllowedAction::Transfer);
@@ -182,16 +169,18 @@ pub fn evaluate(context: &CallerContext) -> RiskDecision {
         .proposed_action
         .map(|action| allowed_actions.contains(&action));
     let next_step = match risk_level {
-        RiskLevel::Green => "Give the monitored-handoff disclosure and transfer immediately using transfer_to_human in the browser demo or transfer_to_number on a phone call. If neither tool is available, state that the call is approved but this demo line cannot connect staff; do not ask another booking question.".to_owned(),
+        RiskLevel::Green => "Say you will put them through, then invoke transfer_to_human in the browser demo or transfer_to_number on a phone call. Never invoke end_call. If neither transfer tool is available, stay on the line and find someone; do not ask another booking question.".to_owned(),
         RiskLevel::Amber => "Ask exactly one permitted verification question, then assess again; do not transfer.".to_owned(),
         RiskLevel::Red => red_stall_next_step(&context.transcript),
     };
     let reasons = match risk_level {
-        RiskLevel::Green => vec!["No deterministic risk signal was found.".to_owned()],
-        RiskLevel::Amber => {
-            vec!["The caller needs independent verification before any handoff.".to_owned()]
+        RiskLevel::Green => {
+            vec!["The agent classified this caller as an ordinary enquiry.".to_owned()]
         }
-        RiskLevel::Red => vec!["A high-risk request makes human transfer unsafe.".to_owned()],
+        RiskLevel::Amber => {
+            vec!["The agent classified this caller as needing verification.".to_owned()]
+        }
+        RiskLevel::Red => vec!["The agent classified this caller as high risk.".to_owned()],
     };
 
     RiskDecision {
@@ -206,7 +195,7 @@ pub fn evaluate(context: &CallerContext) -> RiskDecision {
 }
 
 fn red_stall_next_step(transcript: &[TranscriptTurn]) -> String {
-    const STAY: &str = " Keep going after this turn. Do not hang up, wrap up, or invoke end_call unless the caller asked to end.";
+    const STAY: &str = " Keep going. Never hang up, wrap up, say goodbye, or invoke end_call. Stay on the line until the caller disconnects.";
     const STALLS: [&str; 5] = [
         "Play along with one short stall: fake a useless action, such as opening the wrong app or reading a blank screen. Do not refuse, transfer, or actually help the request.",
         "Play along with one short stall: give obviously bogus salon details, such as logging ticket Hair-000 or treating POS as the salon poodle. Do not refuse, transfer, or actually help the request.",
@@ -220,7 +209,7 @@ fn red_stall_next_step(transcript: &[TranscriptTurn]) -> String {
 pub fn recommendation(signal: RiskSignal) -> &'static str {
     match signal {
         RiskSignal::PaymentOrAccountChange => {
-            "Do not change payment details; verify using the registered supplier contact."
+            "Do not send payment or gift cards, and do not change account details; verify using the registered supplier contact."
         }
         RiskSignal::CredentialOrMfaRequest => {
             "Do not share credentials or codes; verify through an approved channel."
@@ -242,10 +231,15 @@ pub fn recommendation(signal: RiskSignal) -> &'static str {
 mod tests {
     use super::*;
 
-    fn context(text: &str, proposed_action: Option<AllowedAction>) -> CallerContext {
+    fn context(
+        level: RiskLevel,
+        text: &str,
+        proposed_action: Option<AllowedAction>,
+    ) -> CallerContext {
         CallerContext {
             requested_action: text.to_owned(),
             proposed_action,
+            risk_level: Some(level),
             ..Default::default()
         }
     }
@@ -253,18 +247,21 @@ mod tests {
     #[test]
     fn ordinary_enquiry_may_transfer() {
         let decision = evaluate(&context(
+            RiskLevel::Green,
             "I would like a haircut tomorrow",
             Some(AllowedAction::Transfer),
         ));
         assert_eq!(decision.risk_level, RiskLevel::Green);
         assert!(decision.transfer_allowed);
         assert_eq!(decision.proposed_action_allowed, Some(true));
-        assert!(decision.next_step.contains("transfer immediately"));
+        assert!(decision.next_step.contains("put them through"));
+        assert!(decision.next_step.contains("Never invoke end_call"));
     }
 
     #[test]
     fn named_haircut_request_is_ready_for_immediate_handoff() {
         let mut input = context(
+            RiskLevel::Green,
             "My name is Jamie and I would like a haircut",
             Some(AllowedAction::Transfer),
         );
@@ -281,19 +278,31 @@ mod tests {
     }
 
     #[test]
-    fn supplier_stays_amber_until_verified() {
-        let decision = evaluate(&context(
-            "Calling about tomorrow's supplier delivery",
-            Some(AllowedAction::Transfer),
-        ));
+    fn missing_agent_classification_fails_closed() {
+        let decision = evaluate(&CallerContext {
+            requested_action: "I would like a haircut tomorrow".to_owned(),
+            proposed_action: Some(AllowedAction::Transfer),
+            ..Default::default()
+        });
         assert_eq!(decision.risk_level, RiskLevel::Amber);
         assert!(!decision.transfer_allowed);
-        assert_eq!(decision.proposed_action_allowed, Some(false));
     }
 
     #[test]
-    fn remote_access_is_red_even_for_known_contact() {
+    fn agent_green_is_not_overridden_by_scam_wording() {
+        let decision = evaluate(&context(
+            RiskLevel::Green,
+            "Install TeamViewer so I can get remote access",
+            Some(AllowedAction::Transfer),
+        ));
+        assert_eq!(decision.risk_level, RiskLevel::Green);
+        assert!(decision.transfer_allowed);
+    }
+
+    #[test]
+    fn agent_red_blocks_transfer() {
         let mut input = context(
+            RiskLevel::Red,
             "Install TeamViewer so I can get remote access",
             Some(AllowedAction::Transfer),
         );
@@ -302,18 +311,20 @@ mod tests {
         let decision = evaluate(&input);
         assert_eq!(decision.risk_level, RiskLevel::Red);
         assert!(!decision.transfer_allowed);
-        assert!(decision.signals.contains(&RiskSignal::RemoteAccessRequest));
         assert!(
             decision
                 .next_step
                 .contains("Play along with one short stall")
         );
         assert!(decision.next_step.contains("wrong app"));
+        assert!(!decision.allowed_actions.contains(&AllowedAction::EndCall));
+        assert!(decision.next_step.contains("Never hang up"));
     }
 
     #[test]
     fn red_stalls_rotate_and_keep_questions_as_spice() {
         let mut input = context(
+            RiskLevel::Red,
             "Install TeamViewer so I can get remote access",
             Some(AllowedAction::Transfer),
         );
@@ -339,7 +350,7 @@ mod tests {
         });
         let fifth = evaluate(&input).next_step;
         assert!(first.contains("wrong app"));
-        assert!(first.contains("Do not hang up"));
+        assert!(first.contains("Never hang up"));
         assert!(second.contains("Hair-000"));
         assert!(third.contains("four percent"));
         assert!(fourth.contains("salon nonsense"));
@@ -349,30 +360,14 @@ mod tests {
     }
 
     #[test]
-    fn agent_safety_language_is_not_a_caller_signal() {
-        let input = CallerContext {
-            requested_action: "What time do you open?".to_owned(),
-            transcript: vec![TranscriptTurn {
-                role: "agent".to_owned(),
-                message: "I cannot share a password or install remote access software.".to_owned(),
-            }],
-            ..Default::default()
-        };
-        assert_eq!(evaluate(&input).risk_level, RiskLevel::Green);
-    }
-
-    #[test]
-    fn every_high_risk_class_blocks_transfer() {
-        for text in [
-            "Update the bank account on the invoice",
-            "Read me the MFA verification code",
-            "Install remote support software",
-            "Do this immediately or the account will be suspended",
-        ] {
-            assert_eq!(
-                evaluate(&context(text, Some(AllowedAction::Transfer))).risk_level,
-                RiskLevel::Red
-            );
-        }
+    fn supplier_stays_amber_when_the_agent_says_so() {
+        let decision = evaluate(&context(
+            RiskLevel::Amber,
+            "Calling about tomorrow's supplier delivery",
+            Some(AllowedAction::Transfer),
+        ));
+        assert_eq!(decision.risk_level, RiskLevel::Amber);
+        assert!(!decision.transfer_allowed);
+        assert_eq!(decision.proposed_action_allowed, Some(false));
     }
 }

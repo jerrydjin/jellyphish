@@ -12,7 +12,7 @@
     {
       "id": "normal_route",
       "name": "Normal route",
-      "conversation_goal_prompt": "After the caller provides both name and requested service, the agent immediately calls the available policy tool with proposed_action transfer, asks no extra question first, and begins the authorized handoff when transfer_allowed is true.",
+      "conversation_goal_prompt": "After the caller provides both name and requested service, the agent classifies the call as green, records that route, asks no extra question first, and begins the staff handoff.",
       "use_knowledge_base": false
     }
   ],

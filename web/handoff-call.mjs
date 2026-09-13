@@ -1,9 +1,9 @@
 const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 
-export async function postJson(url, body) {
+export async function postJson(url, body, headers = {}) {
   const response = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => ({}));
@@ -11,8 +11,8 @@ export async function postJson(url, body) {
   return data;
 }
 
-export async function fetchHandoffRoom(sessionId) {
-  const response = await fetch(`/api/handoff/${encodeURIComponent(sessionId)}`, { cache: "no-store" });
+export async function fetchHandoffRoom(line, sessionId) {
+  const response = await fetch(`/api/handoff/${encodeURIComponent(line)}/${encodeURIComponent(sessionId)}`, { cache: "no-store" });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || "Handoff room is unavailable");
   return data;
@@ -30,6 +30,150 @@ export function callerPreviewFromTurns(turns = []) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const MAX_RECORD_MS = 10_000;
+const MAX_IDLE_MS = 4_000;
+const MIN_SPEECH_MS = 320;
+const END_SILENCE_MS = 720;
+const MIN_AUDIO_BYTES = 1200;
+const SPEECH_RMS = 0.018;
+
+function recorderMime() {
+  const types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+  return types.find((type) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type)) || "";
+}
+
+function streamCaptions({ stream, role, line, sessionId, captionKey, enqueueUpload, onText, isClosed }) {
+  const mime = recorderMime();
+  if (!mime || !stream) return speechRecognizer(role, onText);
+  let active = true;
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  let audioContext = null;
+  let analyser = null;
+  let samples = null;
+  if (AudioContext) {
+    try {
+      audioContext = new AudioContext();
+      audioContext.resume?.().catch(() => {});
+      const source = audioContext.createMediaStreamSource(stream);
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.2;
+      samples = new Float32Array(analyser.fftSize);
+      source.connect(analyser);
+    } catch {
+      audioContext?.close?.().catch(() => {});
+      audioContext = null;
+      analyser = null;
+    }
+  }
+
+  function speechLevel() {
+    if (!analyser || !samples) return 1;
+    analyser.getFloatTimeDomainData(samples);
+    let sum = 0;
+    for (const sample of samples) sum += sample * sample;
+    return Math.sqrt(sum / samples.length);
+  }
+
+  async function recordOnce() {
+    const parts = [];
+    let recorder;
+    try {
+      recorder = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 24_000 });
+    } catch {
+      try {
+        recorder = new MediaRecorder(stream, { mimeType: mime });
+      } catch {
+        return { blob: new Blob([], { type: mime }), speechDetected: false };
+      }
+    }
+    recorder.ondataavailable = (event) => {
+      if (event.data?.size) parts.push(event.data);
+    };
+    return new Promise((resolve) => {
+      let firstSpeechAt = 0;
+      let lastSpeechAt = 0;
+      let monitor = null;
+      const finish = () => {
+        clearInterval(monitor);
+        resolve({ blob: new Blob(parts, { type: mime }), speechDetected: Boolean(firstSpeechAt) });
+      };
+      recorder.onerror = finish;
+      recorder.onstop = finish;
+      try {
+        recorder.start();
+      } catch {
+        finish();
+        return;
+      }
+      const startedAt = Date.now();
+      monitor = setInterval(() => {
+        const now = Date.now();
+        if (speechLevel() >= SPEECH_RMS) {
+          firstSpeechAt ||= now;
+          lastSpeechAt = now;
+        }
+        const enoughSpeech = firstSpeechAt && lastSpeechAt - firstSpeechAt >= MIN_SPEECH_MS;
+        const utteranceEnded = enoughSpeech && now - lastSpeechAt >= END_SILENCE_MS;
+        const idleExpired = !firstSpeechAt && now - startedAt >= MAX_IDLE_MS;
+        const recordExpired = now - startedAt >= MAX_RECORD_MS;
+        if ((utteranceEnded || idleExpired || recordExpired) && recorder.state === "recording") {
+          clearInterval(monitor);
+          try { recorder.stop(); } catch { finish(); }
+        }
+      }, 80);
+      recorder.addEventListener("stop", () => clearInterval(monitor), { once: true });
+    });
+  }
+
+  async function upload(blob) {
+    try {
+      const response = await fetch(`/api/handoff/${encodeURIComponent(line)}/transcribe`, {
+        method: "POST",
+        headers: {
+          "content-type": blob.type || mime,
+          "x-session-id": sessionId,
+          "x-role": role,
+          "x-caption-key": captionKey,
+        },
+        body: blob,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Caption request failed (${response.status})`);
+      const text = String(data.text || "").trim();
+      if (text) onText({ role, text });
+    } catch (error) {
+      console.warn("[handoff] caption request failed", error);
+    }
+  }
+
+  async function cycle() {
+    while (active && !isClosed?.()) {
+      const tracks = stream.getAudioTracks();
+      if (!tracks.length || tracks.every((track) => track.readyState !== "live")) {
+        await sleep(400);
+        continue;
+      }
+      const { blob, speechDetected } = await recordOnce();
+      if (!active || isClosed?.()) return;
+      if (!speechDetected || blob.size < MIN_AUDIO_BYTES) continue;
+      // Keep recording while the previous utterance is transcribed. Serializing
+      // only the uploads preserves speaker order without dropping live audio.
+      enqueueUpload(() => upload(blob));
+    }
+  }
+
+  cycle();
+  return {
+    available: true,
+    start() {},
+    stop() {
+      active = false;
+      audioContext?.close?.().catch(() => {});
+    },
+  };
 }
 
 function speechRecognizer(role, onFinal) {
@@ -67,34 +211,45 @@ function speechRecognizer(role, onFinal) {
 }
 
 export class HandoffCall {
-  constructor({ role, sessionId, remoteAudio, onState }) {
+  constructor({ role, line, sessionId, remoteAudio, onState, onTranscript, captureCaptions = role === "caller" }) {
     this.role = role;
+    this.line = line;
     this.sessionId = sessionId;
     this.remoteAudio = remoteAudio;
     this.onState = onState || (() => {});
+    this.onTranscript = onTranscript || (() => {});
+    this.captureCaptions = captureCaptions;
+    this.captionKey = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     this.pc = null;
     this.localStream = null;
-    this.speech = null;
+    this.captions = [];
+    this.captionQueue = Promise.resolve();
+    this.remoteCaptioned = false;
     this.remoteSet = false;
     this.pendingIce = [];
+    this.localIce = [];
+    this.roomReady = role === "staff";
     this.muted = false;
     this.closed = false;
     this.startedAt = 0;
+    this.disconnectTimer = null;
   }
 
   async startCaller({ disclosureGiven = true, callerName = "", requestedAction = "" } = {}) {
     await this.#openPeer();
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
-    await postJson("/api/handoff/ring", {
+    await postJson(`/api/handoff/${encodeURIComponent(this.line)}/ring`, {
       session_id: this.sessionId,
       disclosure_given: disclosureGiven,
       caller_name: callerName || null,
       requested_action: requestedAction || null,
+      caption_key: this.captionKey,
       offer: { type: offer.type, sdp: offer.sdp },
     });
+    this.roomReady = true;
+    for (const candidate of this.localIce.splice(0)) this.#sendIce(candidate);
     this.startedAt = Date.now();
-    this.#listen();
     this.onState("ringing");
     this.#waitForAnswer();
     return { status: "ringing" };
@@ -111,7 +266,7 @@ export class HandoffCall {
     }
     const answer = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answer);
-    await postJson("/api/handoff/signal", {
+    await postJson(`/api/handoff/${encodeURIComponent(this.line)}/signal`, {
       session_id: this.sessionId,
       from: "staff",
       kind: "answer",
@@ -128,6 +283,7 @@ export class HandoffCall {
       await this.pc.setRemoteDescription(event.payload);
       this.remoteSet = true;
       await this.#flushIce();
+      this.#listen();
       this.onState("connected");
     }
     if (event.kind === "ice" && event.from !== this.role && event.payload) {
@@ -150,7 +306,7 @@ export class HandoffCall {
   async hangup() {
     if (this.closed) return;
     try {
-      await postJson("/api/handoff/hangup", { session_id: this.sessionId, from: this.role });
+      await postJson(`/api/handoff/${encodeURIComponent(this.line)}/hangup`, { session_id: this.sessionId, from: this.role });
     } catch {}
     this.close(false);
     this.onState("ended");
@@ -159,8 +315,10 @@ export class HandoffCall {
   close(notify = true) {
     if (this.closed) return;
     this.closed = true;
-    this.speech?.stop();
-    this.speech = null;
+    clearTimeout(this.disconnectTimer);
+    this.disconnectTimer = null;
+    for (const caption of this.captions) caption.stop();
+    this.captions = [];
     for (const track of this.localStream?.getTracks() || []) track.stop();
     this.localStream = null;
     try { this.pc?.close(); } catch {}
@@ -173,22 +331,35 @@ export class HandoffCall {
     this.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     this.pc.onicecandidate = (event) => {
       if (!event.candidate || this.closed) return;
-      postJson("/api/handoff/signal", {
-        session_id: this.sessionId,
-        from: this.role,
-        kind: "ice",
-        payload: event.candidate.toJSON(),
-      }).catch(() => {});
+      const candidate = event.candidate.toJSON();
+      if (!this.roomReady) {
+        this.localIce.push(candidate);
+        return;
+      }
+      this.#sendIce(candidate);
     };
     this.pc.ontrack = (event) => {
-      if (!this.remoteAudio) return;
-      this.remoteAudio.srcObject = event.streams[0] || new MediaStream(event.track ? [event.track] : []);
-      this.remoteAudio.play?.().catch(() => {});
+      const stream = event.streams[0] || new MediaStream(event.track ? [event.track] : []);
+      if (this.remoteAudio) {
+        this.remoteAudio.srcObject = stream;
+        this.remoteAudio.play?.().catch(() => {});
+      }
+      if (this.captureCaptions && !this.remoteCaptioned && stream.getAudioTracks().length) {
+        this.remoteCaptioned = true;
+        this.#captionStream(stream, this.role === "staff" ? "caller" : "staff");
+      }
     };
     this.pc.onconnectionstatechange = () => {
-      if (this.pc?.connectionState === "connected") this.onState("connected");
-      if (this.pc?.connectionState === "failed" || this.pc?.connectionState === "disconnected") {
-        this.onState(this.pc.connectionState);
+      const state = this.pc?.connectionState;
+      if (state === "connected") {
+        clearTimeout(this.disconnectTimer);
+        this.disconnectTimer = null;
+        this.onState("connected");
+      }
+      if (state === "failed") {
+        this.#endAfterConnectionLoss("failed");
+      } else if (state === "disconnected" && !this.disconnectTimer) {
+        this.disconnectTimer = setTimeout(() => this.#endAfterConnectionLoss("disconnected"), 4_000);
       }
     };
     this.localStream = await navigator.mediaDevices.getUserMedia({
@@ -198,15 +369,44 @@ export class HandoffCall {
     for (const track of this.localStream.getTracks()) this.pc.addTrack(track, this.localStream);
   }
 
+  #sendIce(candidate) {
+    postJson(`/api/handoff/${encodeURIComponent(this.line)}/signal`, {
+      session_id: this.sessionId,
+      from: this.role,
+      kind: "ice",
+      payload: candidate,
+    }).catch(() => {});
+  }
+
   #listen() {
-    this.speech = speechRecognizer(this.role, ({ text }) => {
-      postJson("/api/handoff/transcript", {
-        session_id: this.sessionId,
-        role: this.role,
-        text,
-      }).catch(() => {});
+    if (this.captureCaptions) this.#captionStream(this.localStream, this.role);
+  }
+
+  #captionStream(stream, role) {
+    if (!stream || this.closed) return;
+    const caption = streamCaptions({
+      stream,
+      role,
+      line: this.line,
+      sessionId: this.sessionId,
+      captionKey: this.captionKey,
+      enqueueUpload: (task) => {
+        this.captionQueue = this.captionQueue.then(task);
+      },
+      isClosed: () => this.closed,
+      onText: ({ text }) => {
+        this.onTranscript({ role, text });
+        if (!recorderMime()) {
+          postJson(`/api/handoff/${encodeURIComponent(this.line)}/transcript`, {
+            session_id: this.sessionId,
+            role,
+            text,
+          }, { "x-caption-key": this.captionKey }).catch(() => {});
+        }
+      },
     });
-    this.speech.start();
+    caption.start();
+    this.captions.push(caption);
   }
 
   async #flushIce() {
@@ -220,7 +420,7 @@ export class HandoffCall {
     const deadline = Date.now() + 45_000;
     while (!this.closed && !this.remoteSet && Date.now() < deadline) {
       try {
-        const room = await fetchHandoffRoom(this.sessionId);
+        const room = await fetchHandoffRoom(this.line, this.sessionId);
         if (room.answer) {
           await this.handleSignal({ sessionId: this.sessionId, kind: "answer", payload: room.answer, from: "staff" });
           for (const candidate of room.staffIce || []) {
@@ -236,6 +436,21 @@ export class HandoffCall {
       } catch {}
       await sleep(400);
     }
-    if (!this.remoteSet && !this.closed) this.onState("timeout");
+    if (!this.remoteSet && !this.closed) {
+      try {
+        await postJson(`/api/handoff/${encodeURIComponent(this.line)}/hangup`, { session_id: this.sessionId, from: this.role });
+      } catch {}
+      this.close(false);
+      this.onState("timeout");
+    }
+  }
+
+  async #endAfterConnectionLoss(reason) {
+    if (this.closed) return;
+    try {
+      await postJson(`/api/handoff/${encodeURIComponent(this.line)}/hangup`, { session_id: this.sessionId, from: this.role });
+    } catch {}
+    this.close(false);
+    this.onState(reason);
   }
 }

@@ -34,7 +34,7 @@ const updateResponse = await fetch(endpoint, {
   headers,
   body: JSON.stringify({
     conversation_config: current.conversation_config,
-    version_description: "Enable Rust-authorized fast green human handoff",
+    version_description: "Enable agent-judged fast green human handoff",
   }),
 });
 if (!updateResponse.ok) throw new Error(`Updating agent failed (${updateResponse.status}): ${await updateResponse.text()}`);
@@ -47,4 +47,4 @@ const deployedTransfer = verified.conversation_config?.agent?.prompt?.built_in_t
 const deployedNumber = deployedTransfer?.params?.transfers?.[0]?.transfer_destination?.phone_number;
 if (deployedNumber !== transferNumber) throw new Error("Transfer update returned successfully but the destination did not verify");
 
-console.log(`Rust-authorized fast green transfer applied and verified for ${agentId}.`);
+console.log(`Agent-judged fast green transfer applied and verified for ${agentId}.`);

@@ -2,7 +2,7 @@
   "tool_config": {
     "type": "webhook",
     "name": "assess_call",
-    "description": "Ask the deterministic Rust policy engine what actions are allowed. Call before every transfer, for each business caller, and whenever risk-relevant facts change. The response is authoritative.",
+    "description": "Record Sol's silent classification for the operator console and return the allowed actions for that route. Sol decides green, amber, or red from the caller's meaning. Call whenever the route changes and before every transfer.",
     "response_timeout_secs": 5,
     "api_schema": {
       "url": "__PUBLIC_BASE_URL__/tool/assess",
@@ -10,9 +10,10 @@
       "request_body_schema": {
         "type": "object",
         "description": "Current caller facts and faithful relevant transcript excerpts.",
-        "required": ["call_id", "requested_action", "proposed_action"],
+        "required": ["call_id", "risk_level", "requested_action", "proposed_action"],
         "properties": {
           "call_id": { "type": "string", "description": "The current ElevenLabs conversation ID." },
+          "risk_level": { "type": "string", "enum": ["green", "amber", "red"], "description": "Sol's silent classification of this caller." },
           "caller_name": { "type": "string", "description": "Claimed caller name, or empty." },
           "claimed_company": { "type": "string", "description": "Claimed business, or empty." },
           "business_caller": { "type": "boolean", "description": "True for supplier, delivery, provider, technician, or other business callers." },

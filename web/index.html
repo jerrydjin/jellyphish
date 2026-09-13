@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Live call screening console for Studio Sol Hair." />
-    <title>Studio Sol — Call Console</title>
+    <meta name="description" content="Live call screening console." />
+    <title>Barbershop, inbound.</title>
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
@@ -38,7 +38,7 @@
       .brand-name { font-size: 1.02rem; letter-spacing: -.04em; }
       .nav-links { display: flex; align-items: center; gap: 28px; }
       .nav-links a { color: #292929; font-size: .8rem; font-weight: 400; text-decoration: none; }
-      .nav-links a:hover, .nav-links a:focus-visible { text-decoration: underline; outline: none; }
+      .nav-links a:hover, .nav-links a:focus-visible, .nav-links a.current { text-decoration: underline; outline: none; }
       .nav-actions { display: flex; align-items: center; gap: 16px; margin-left: auto; }
       .nav-status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .72rem; white-space: nowrap; }
       .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
@@ -115,7 +115,7 @@
       .staff-mute { width: 100%; min-height: 42px; padding: 10px 14px; border: 1px solid var(--border-strong); border-radius: 3px; color: #111; background: #fff; cursor: pointer; font-size: .8rem; }
       .staff-mute.on { color: #fff; background: #111; }
       .monitor-card.ringing .wave i, .monitor-card.live .wave i { animation: wave .85s ease-in-out infinite alternate; }
-      .staff-stage .live-lines { height: 151px; }
+      .staff-stage .live-lines { height: 220px; }
       .line.staff .line-role { color: #6a7500; }
       .monitor-card .status-pill.ringing { color: var(--green); animation: ring-pulse 1s ease-in-out infinite; }
       @keyframes ring-pulse { 50% { opacity: .45; } }
@@ -193,11 +193,11 @@
   <body>
     <header class="site-nav">
       <div class="nav-inner">
-        <div class="nav-brand"><div class="brand-mark"><img src="/icons/icon-192.png" alt="" /></div><div><span class="brand-name">Studio Sol</span></div></div>
+        <div class="nav-brand"><div class="brand-mark"><img src="/icons/icon-192.png" alt="" /></div><div><span class="brand-name" id="brand-name">Barbershop</span></div></div>
         <nav class="nav-links" aria-label="Primary navigation">
-          <a href="#overview">Overview</a>
+          <a href="/" id="nav-barbershop">Barbershop</a>
+          <a href="/dental/" id="nav-dental">Dental</a>
           <a href="#live-card">Live calls</a>
-          <a href="#monitor-title">Handoffs</a>
           <a href="#workspace">Call history</a>
         </nav>
         <div class="nav-actions"><span class="nav-status"><span class="live-dot"></span><span id="sync-label">Connecting to ElevenLabs</span></span><button class="refresh" id="refresh" type="button">Refresh</button></div>
@@ -205,7 +205,7 @@
     </header>
     <main>
       <header class="topbar" id="overview">
-        <div><h1>Good afternoon, Studio Sol.</h1></div>
+        <div><h1 id="headline">Barbershop, inbound.</h1></div>
       </header>
       <section class="live-card" id="live-card" aria-labelledby="live-title">
         <div class="live-meta">
@@ -230,7 +230,7 @@
           <div class="staff-meta">
             <div class="live-heading"><h2>Staff line</h2></div>
             <div class="live-time" id="staff-time">00:00</div>
-            <div class="live-caption" id="staff-caption">Waiting for Sol to hand off a screened caller</div>
+            <div class="live-caption" id="staff-caption">Waiting for a screened caller</div>
             <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
             <div class="staff-actions">
               <button class="call-toggle" id="staff-answer" type="button" hidden>Answer incoming call</button>
@@ -241,7 +241,7 @@
           <div class="live-transcript">
             <div class="live-transcript-head"><span class="transcript-label">Live transcript</span><span class="route-pill" id="staff-route">Human line</span></div>
             <div class="sidecar-meta" id="sidecar-meta"><span class="sidecar-tag">Staff pickup</span><span class="sidecar-tag">AI silent after handoff</span></div>
-            <div class="live-lines" id="sidecar-lines"><p class="empty">When Sol hands off, pick up here. Speech from the caller and this staff line will write in live.</p></div>
+            <div class="live-lines" id="sidecar-lines"><p class="empty">When the assistant hands off, pick up here. Speech from the caller and this staff line will write in live.</p></div>
           </div>
         </div>
         <div class="alerts" id="handoff-alert" aria-live="assertive"><p class="alert-empty">No post-handoff risk alert.</p></div>
@@ -258,18 +258,28 @@
       </section>
     </main>
     <script type="module">
-      import { conversationListFingerprint, effectiveConversationStatus, liveElapsedSeconds, operatorStaffPhase, routePresentation, shouldAutoselectConversation } from "./call-lifecycle.mjs";
-      import { fetchHandoffRoom, HandoffCall } from "./handoff-call.mjs";
+      import { conversationListFingerprint, handoffSidecarTranscript, humanOutcome as presentHumanOutcome, liveElapsedSeconds, operatorStaffPhase, routePresentation, shouldAutoselectConversation } from "/call-lifecycle.mjs?v=stream6";
+      import { fetchHandoffRoom, HandoffCall } from "/handoff-call.mjs?v=stream6";
 
-      // The business line this dashboard answers for. Callers reach it from /phone/.
-      const LINE = "studio-sol";
+      const $ = (id) => document.getElementById(id);
+      const BUSINESSES = {
+        "studio-sol": { name: "Barbershop", assistant: "Konner", headline: "Barbershop, inbound.", title: "Barbershop, inbound." },
+        "dental-clinic": { name: "Evan & Kevin Dental", assistant: "Net", headline: "Welcome back, Ev & Kev.", title: "Welcome back, Ev & Kev." },
+      };
+      const LINE = location.pathname.replace(/\/+$/, "").endsWith("/dental") ? "dental-clinic" : (new URLSearchParams(location.search).get("line") || "studio-sol");
+      const biz = BUSINESSES[LINE] || BUSINESSES["studio-sol"];
+      document.title = biz.title;
+      document.querySelector('meta[name="description"]')?.setAttribute("content", `Live call screening console for ${biz.name}.`);
+      $("brand-name").textContent = biz.name;
+      $("headline").textContent = biz.headline;
+      $("nav-barbershop")?.classList.toggle("current", LINE === "studio-sol");
+      $("nav-dental")?.classList.toggle("current", LINE === "dental-clinic");
       const STALE_AFTER_MS = 20_000;
       const RECENT_END_MS = 60_000;
-      const ENDED_CALL_KEY = "jellyphish:last-ended-call";
+      const ENDED_CALL_KEY = `jellyphish:last-ended-call:${LINE}`;
       const savedEndedCall = (() => { try { return JSON.parse(sessionStorage.getItem(ENDED_CALL_KEY) || "null"); } catch { return null; } })();
       const idleLive = () => ({ callId: null, status: "idle", active: false, ringing: false, sessionId: null, startedAt: 0, endedAt: 0, updatedAt: 0, transcript: [], route: null, callerNumber: null, muted: false, mode: null });
       const state = { conversations: [], selectedId: null, loadedDetailId: null, endedCall: savedEndedCall, live: idleLive(), monitor: { status: "idle" }, loadingDetail: false };
-      const $ = (id) => document.getElementById(id);
       let userPinnedSelection = false;
       let conversationFingerprint = "";
       let incomingRoom = null;
@@ -282,40 +292,21 @@
       function escapeHTML(value = "") {
         return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
       }
-      function routeOf(call) { return String(call?.policy?.risk_level || call?.data?.route || "").toLowerCase(); }
+      function routeRank(route) {
+        const normalized = String(route || "").toLowerCase();
+        if (normalized === "red") return 3;
+        if (normalized === "amber") return 2;
+        if (normalized === "green") return 1;
+        return 0;
+      }
+      function routeOf(call) {
+        const policy = String(call?.policy?.risk_level || "").toLowerCase();
+        const recorded = String(call?.data?.route || "").toLowerCase();
+        return routeRank(recorded) > routeRank(policy) ? recorded : policy;
+      }
       function formatDuration(seconds = 0) { const m = Math.floor(seconds / 60); const s = Math.floor(seconds % 60); return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`; }
       function formatClock(unix) { return unix ? new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" }).format(new Date(unix * 1000)) : "Now"; }
       function displayTitle(call) { return call.title || call.data?.requested_action || (routeOf(call) === "red" ? "Suspicious call" : "General enquiry"); }
-      let assessmentSequence = 0;
-      let assessedUserTurns = 0;
-      async function assessLive() {
-        const callerTurns = state.live.transcript.filter((turn) => turn.role === "user" && !turn.pending);
-        if (!callerTurns.length) return;
-        const sequence = ++assessmentSequence;
-        const text = callerTurns.map((turn) => turn.message).join(" ");
-        try {
-          const response = await fetch("/tool/assess", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              call_id: `phone_${state.live.callId}`,
-              requested_action: text,
-              transcript: callerTurns,
-            }),
-          });
-          const decision = await response.json();
-          if (!response.ok) throw new Error(decision.error || "Policy service unavailable");
-          if (sequence !== assessmentSequence) return;
-          state.live.route = decision.risk_level;
-          renderLive();
-        } catch {
-          if (sequence === assessmentSequence) {
-            state.live.route = null;
-            $("live-route").textContent = "Policy unavailable · no transfer";
-            $("live-route").className = "route-pill";
-          }
-        }
-      }
       function renderMonitor(monitor = state.monitor) {
         const phase = operatorStaffPhase(monitor, { answered: Boolean(staffCall) });
         const idle = phase === "idle";
@@ -339,14 +330,14 @@
         };
         $("monitor-subtitle").textContent = degraded ? "Transfer connected · sidecar unavailable" : (subtitles[phase] || subtitles.idle);
         $("staff-caption").textContent = ringing
-          ? "Sol approved this caller. Answer to take over the line."
+          ? `${biz.assistant} approved this caller. Answer to take over the line.`
           : onStaffLine
-            ? "Sol is silent. This is a live staff conversation."
+            ? `${biz.assistant} is silent. This is a live staff conversation.`
             : phase === "ended"
               ? "The staff call has ended."
               : phase === "monitoring"
                 ? "Read-only monitor · the human conference is already connected."
-                : "Waiting for Sol to hand off a screened caller";
+                : `Waiting for ${biz.assistant} to hand off a screened caller`;
         $("staff-route").textContent = ringing ? "Incoming" : onStaffLine ? "Live" : "Human line";
         $("staff-answer").hidden = !ringing;
         $("staff-mute").hidden = !staffCall;
@@ -356,10 +347,13 @@
         $("sidecar-meta").innerHTML = idle
           ? `<span class="sidecar-tag">Staff pickup</span><span class="sidecar-tag">AI silent after handoff</span>`
           : `<span class="sidecar-tag ${monitor.disclosureGiven ? "ok" : ""}">${monitor.disclosureGiven ? "Disclosure given" : "Disclosure missing"}</span><span class="sidecar-tag ${monitor.aiMuted ? "ok" : ""}">${monitor.aiMuted ? "AI silent" : "Check AI state"}</span><span class="sidecar-tag ${!degraded && !idle ? "ok" : ""}">${degraded ? "Transfer preserved" : onStaffLine || ringing ? "Live staff line" : "Transcript streaming"}</span>`;
-        const transcript = idle ? [] : (monitor?.transcript || []);
-        $("sidecar-lines").innerHTML = transcript.length
-          ? transcript.map((turn) => `<div class="line ${escapeHTML(turn.role)}"><span class="line-role">${turn.role === "staff" ? "Staff" : "Caller"}</span><span class="line-text">${escapeHTML(turn.text)}</span></div>`).join("")
-          : `<p class="empty">${degraded ? `Monitoring failed, but the human transfer remains connected. ${escapeHTML(monitor.error || "")}` : ringing ? "Answer to start the live staff transcript." : "When Sol hands off, pick up here. Speech from the caller and this staff line will write in live."}</p>`;
+        const sidecar = handoffSidecarTranscript(monitor, state.live);
+        $("sidecar-lines").innerHTML = sidecar.turns.length
+          ? sidecar.turns.map((turn) => {
+              const role = turn.role === "staff" ? "Staff" : turn.role === "agent" ? biz.assistant : "Caller";
+              return `<div class="line ${escapeHTML(turn.role)}${turn.pending ? " pending" : ""}"><span class="line-role">${role}</span><span class="line-text">${escapeHTML(turn.text)}</span></div>`;
+            }).join("")
+          : `<p class="empty">${degraded ? `Monitoring failed, but the human transfer remains connected. ${escapeHTML(monitor.error || "")}` : ringing ? "Answer to start the live staff transcript." : `When ${biz.assistant} hands off, pick up here. Speech from the caller and this staff line will write in live.`}</p>`;
         $("sidecar-lines").scrollTop = $("sidecar-lines").scrollHeight;
         const alerts = idle ? [] : (monitor?.alerts || []);
         const alert = alerts.find((item) => item.signals.some((signal) => signal.id === "payment_or_account_change")) || alerts.at(-1);
@@ -378,7 +372,7 @@
         const sessionId = incomingRoom?.sessionId || state.monitor?.sessionId;
         if (sessionId) {
           try {
-            await fetch("/api/handoff/hangup", {
+            await fetch(`/api/handoff/${encodeURIComponent(LINE)}/hangup`, {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ session_id: sessionId, from: "staff" }),
@@ -389,13 +383,7 @@
       }
 
       function humanOutcome(call) {
-        const status = effectiveConversationStatus(call, state.endedCall?.id);
-        const outcome = String(call?.data?.outcome || status || "");
-        if (/caller disconnected|disconnected/i.test(outcome)) return "Call ended";
-        if (/transfer/i.test(outcome)) return "Handed to staff";
-        if (/message/i.test(outcome)) return "Message taken";
-        if (/completed|complete|resolved/i.test(outcome)) return "Conversation complete";
-        return outcome || "Processing";
+        return presentHumanOutcome(call, state.endedCall?.id);
       }
       function renderCalls() {
         const list = $("call-list");
@@ -413,8 +401,8 @@
 
       function liveView(live = state.live) {
         const finished = live.status === "ended" || live.status === "lost";
-        if (live.ringing) return { pill: "Incoming", tone: "ringing", caption: "Ringing · Sol is picking up", empty: "Connecting the caller…" };
-        if (live.active) return { pill: "Connected", tone: "", caption: live.muted ? "Caller has muted their microphone" : live.mode === "speaking" ? "Sol is speaking" : "Sol is listening", empty: "Connected. Waiting for speech…" };
+        if (live.ringing) return { pill: "Incoming", tone: "ringing", caption: `Ringing · ${biz.assistant} is picking up`, empty: "Connecting the caller…" };
+        if (live.active) return { pill: "Connected", tone: "", caption: live.muted ? "Caller has muted their microphone" : live.mode === "speaking" ? `${biz.assistant} is speaking` : `${biz.assistant} is listening`, empty: "Connected. Waiting for speech…" };
         if (finished && serverNow() - live.endedAt < RECENT_END_MS) return { pill: "Ended", tone: "idle", caption: live.status === "lost" ? "Caller's connection dropped" : "Call ended · finalizing transcript", empty: "No speech was captured before the call ended." };
         if (finished) return { pill: "Idle", tone: "idle", caption: `Last call ended at ${formatClock(live.endedAt / 1000)}`, empty: "No speech was captured on the last call." };
         return { pill: "Idle", tone: "idle", caption: "Waiting for the next call", empty: "Speech will appear here while a call is running." };
@@ -431,9 +419,10 @@
         $("live-caption").textContent = view.caption;
         $("live-route").textContent = presentation.label;
         $("live-route").className = `route-pill ${presentation.route}`;
-        $("live-lines").innerHTML = live.transcript.length ? live.transcript.slice(-8).map((turn) => `<div class="line ${escapeHTML(turn.role)}${turn.pending ? " pending" : ""}"><span class="line-role">${turn.role === "agent" ? "Sol" : "Caller"}</span><span class="line-text">${escapeHTML(turn.message)}</span></div>`).join("") : `<p class="empty">${view.empty}</p>`;
+        $("live-lines").innerHTML = live.transcript.length ? live.transcript.slice(-8).map((turn) => `<div class="line ${escapeHTML(turn.role)}${turn.pending ? " pending" : ""}"><span class="line-role">${turn.role === "agent" ? biz.assistant : turn.role === "staff" ? "Staff" : "Caller"}</span><span class="line-text">${escapeHTML(turn.message)}</span></div>`).join("") : `<p class="empty">${view.empty}</p>`;
         $("live-lines").scrollTop = $("live-lines").scrollHeight;
         $("live-time").textContent = formatDuration(liveElapsedSeconds(live, serverNow()));
+        renderMonitor();
       }
 
       // Mirrors the caller's phone. Snapshots arrive whole, so each one replaces the last.
@@ -446,10 +435,11 @@
         const wasLive = sameCall && (previous.active || previous.ringing);
         const finished = call.status === "ended" || call.status === "lost";
         if (!sameCall) {
-          assessmentSequence += 1;
-          assessedUserTurns = 0;
           if (call.status === "connecting" || call.status === "connected") userPinnedSelection = false;
         }
+        let transcript = call.transcript || [];
+        if (sameCall && !finished && transcript.length < (previous.transcript?.length || 0)) transcript = previous.transcript;
+        const snapshotRoute = call.riskLevel || null;
         state.live = {
           callId: call.callId,
           status: call.status,
@@ -459,20 +449,17 @@
           startedAt: call.startedAt || 0,
           endedAt: call.endedAt || 0,
           updatedAt: call.updatedAt || 0,
-          transcript: call.transcript || [],
-          route: sameCall ? previous.route : null,
+          transcript,
+          route: snapshotRoute || (sameCall ? previous.route : null),
           callerNumber: call.callerNumber || null,
           muted: Boolean(call.muted),
           mode: call.mode || null,
         };
         if (state.live.active && !(sameCall && previous.active)) setTimeout(refreshConversations, 1200);
         if (finished && wasLive) handleLiveEnded();
-        const userTurns = state.live.transcript.filter((turn) => turn.role === "user" && !turn.pending).length;
-        if (!finished && userTurns > assessedUserTurns) { assessedUserTurns = userTurns; assessLive(); }
         renderLive();
       }
       function handleLiveEnded() {
-        assessmentSequence += 1;
         if (state.live.sessionId) {
           state.endedCall = { id: state.live.sessionId, duration: liveElapsedSeconds(state.live), endedAt: state.live.endedAt };
           sessionStorage.setItem(ENDED_CALL_KEY, JSON.stringify(state.endedCall));
@@ -516,19 +503,19 @@
         const legacyLeak = (call.transcript || []).some((turn) => turn.role === "agent" && /(red tarpit|routing model|the user provided|i am still in red)/i.test(turn.message));
         $("detail-meta").textContent = `${formatClock(call.startedAt)} · ${formatDuration(call.duration)}`;
         const factsMarkup = facts.length ? `<details class="detail-inspector"><summary>Call details</summary><div class="facts">${facts.map(([label, value]) => `<div class="fact"><small>${escapeHTML(label)}</small><span class="fact-value" title="${escapeHTML(value)}">${escapeHTML(value)}</span></div>`).join("")}</div></details>` : "";
-        $("detail").innerHTML = `<div style="margin-bottom:8px"><h3 class="detail-title">${escapeHTML(call.title || "Call transcript")}</h3></div>${legacyLeak ? `<div class="notice">This older transcript predates the spoken-output firewall. The current agent passed the no-internal-monologue regression.</div>` : ""}<p class="detail-summary">${escapeHTML(call.summary || "Analysis is still processing for this call.")}</p>${factsMarkup}${call.data?.risk_signals && call.data.risk_signals !== "none" ? `<div class="risk"><span>Risk signals: </span>${escapeHTML(call.data.risk_signals)}</div>` : ""}<div class="transcript">${(call.transcript || []).map((turn) => `<div class="bubble ${escapeHTML(turn.role)}"><small>${turn.role === "agent" ? "Sol" : "Caller"} · ${formatDuration(turn.time)}${turn.interrupted ? " · interrupted" : ""}</small>${escapeHTML(turn.message)}</div>`).join("") || `<p class="empty">Transcript is not available yet.</p>`}</div>`;
+        $("detail").innerHTML = `<div style="margin-bottom:8px"><h3 class="detail-title">${escapeHTML(call.title || "Call transcript")}</h3></div>${legacyLeak ? `<div class="notice">This older transcript predates the spoken-output firewall. The current agent passed the no-internal-monologue regression.</div>` : ""}<p class="detail-summary">${escapeHTML(call.summary || "Analysis is still processing for this call.")}</p>${factsMarkup}${call.data?.risk_signals && call.data.risk_signals !== "none" ? `<div class="risk"><span>Risk signals: </span>${escapeHTML(call.data.risk_signals)}</div>` : ""}<div class="transcript">${(call.transcript || []).map((turn) => `<div class="bubble ${escapeHTML(turn.role)}"><small>${turn.role === "agent" ? biz.assistant : "Caller"} · ${formatDuration(turn.time)}${turn.interrupted ? " · interrupted" : ""}</small>${escapeHTML(turn.message)}</div>`).join("") || `<p class="empty">Transcript is not available yet.</p>`}</div>`;
       }
 
       const liveEvents = new EventSource(`/api/live/${LINE}/events`);
       liveEvents.addEventListener("live", (event) => {
         try { applyLive(JSON.parse(event.data)); } catch {}
       });
-      const monitorEvents = new EventSource("/api/monitor/events");
+      const monitorEvents = new EventSource(`/api/monitor/${encodeURIComponent(LINE)}/events`);
       for (const eventName of ["monitor", "handoff", "transcript", "risk-alert", "monitor-failure"]) {
         monitorEvents.addEventListener(eventName, (event) => {
           state.monitor = JSON.parse(event.data);
           if (state.monitor.handoffStatus === "ringing" && state.monitor.sessionId && !incomingRoom?.offer) {
-            fetchHandoffRoom(state.monitor.sessionId).then((room) => { incomingRoom = room; renderMonitor(); }).catch(() => {});
+            fetchHandoffRoom(LINE, state.monitor.sessionId).then((room) => { incomingRoom = room; renderMonitor(); }).catch(() => {});
           }
           renderMonitor();
         });
@@ -557,7 +544,8 @@
       });
       async function refreshConversations({ forceDetail = false } = {}) {
         try {
-          const response = await fetch("/api/conversations", { cache: "no-store" });
+          const qs = biz.agentId ? `?agent_id=${encodeURIComponent(biz.agentId)}` : "";
+          const response = await fetch(`/api/conversations${qs}`, { cache: "no-store" });
           const result = await response.json();
           if (!response.ok) throw new Error(result.error || "Could not load conversations");
           const next = result.conversations || [];
@@ -606,7 +594,7 @@
         let room = incomingRoom;
         if (!room?.offer && state.monitor?.sessionId) {
           try {
-            room = await fetchHandoffRoom(state.monitor.sessionId);
+            room = await fetchHandoffRoom(LINE, state.monitor.sessionId);
             incomingRoom = room;
           } catch (error) {
             $("staff-caption").textContent = error.message;
@@ -619,11 +607,12 @@
         }
         staffCall = new HandoffCall({
           role: "staff",
+          line: LINE,
           sessionId: room.sessionId,
           remoteAudio: $("handoff-remote"),
           onState: (phase) => {
             if (phase === "connected") staffCallStartedAt = Date.now();
-            if (phase === "ended" || phase === "timeout") {
+            if (["ended", "timeout", "failed", "disconnected"].includes(phase)) {
               staffCall = null;
               staffCallStartedAt = 0;
             }
@@ -649,10 +638,15 @@
         renderMonitor();
       });
       $("refresh").addEventListener("click", () => refreshConversations({ forceDetail: true }));
-      renderMonitor();
-      renderLive();
-      refreshConversations();
-      setInterval(() => refreshConversations(), 8000);
+      fetch("/api/health").then((response) => response.json()).then((health) => {
+        const id = health?.lines?.[LINE]?.agentId || (LINE === "studio-sol" ? health?.agentId : "");
+        if (id) biz.agentId = id;
+      }).catch(() => {}).finally(() => {
+        renderMonitor();
+        renderLive();
+        refreshConversations();
+        setInterval(() => refreshConversations(), 8000);
+      });
     </script>
   </body>
 </html>

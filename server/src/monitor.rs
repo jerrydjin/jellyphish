@@ -1,5 +1,5 @@
 use crate::db::now_millis;
-use risk_core::{CallerContext, RiskLevel, RiskSignal, TranscriptTurn, evaluate, recommendation};
+use risk_core::{CallerContext, RiskSignal, TranscriptTurn, detect_signals, recommendation};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -36,6 +36,7 @@ pub struct MonitorAlert {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitorSession {
+    pub line: String,
     #[serde(rename = "sessionId")]
     pub session_id: String,
     pub source: String,
@@ -66,11 +67,12 @@ pub enum MonitorSnapshot {
         #[serde(rename = "signalCatalog")]
         signal_catalog: Vec<MonitorSignal>,
     },
-    Active(MonitorSession),
+    Active(Box<MonitorSession>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HandoffRoom {
+    pub line: String,
     #[serde(rename = "sessionId")]
     pub session_id: String,
     pub status: String,
@@ -86,13 +88,28 @@ pub struct HandoffRoom {
     pub caller_ice: Vec<Value>,
     #[serde(rename = "staffIce")]
     pub staff_ice: Vec<Value>,
+    #[serde(skip)]
+    caption_key: String,
+    #[serde(skip)]
+    ended_at: Option<i64>,
+}
+
+pub struct RingParams {
+    pub line: String,
+    pub session_id: String,
+    pub disclosure_given: bool,
+    pub caller_name: Option<String>,
+    pub requested_action: Option<String>,
+    pub caption_key: String,
+    pub offer: Value,
+    pub source: &'static str,
 }
 
 pub struct MonitorHub {
     sessions: HashMap<String, MonitorSession>,
     rooms: HashMap<String, HandoffRoom>,
-    active_id: Option<String>,
-    events: broadcast::Sender<(String, String)>,
+    active_ids: HashMap<String, String>,
+    events: broadcast::Sender<(String, String, String)>,
 }
 
 impl Default for MonitorHub {
@@ -101,22 +118,23 @@ impl Default for MonitorHub {
         Self {
             sessions: HashMap::new(),
             rooms: HashMap::new(),
-            active_id: None,
+            active_ids: HashMap::new(),
             events,
         }
     }
 }
 
 impl MonitorHub {
-    pub fn subscribe(&self) -> broadcast::Receiver<(String, String)> {
+    pub fn subscribe(&self) -> broadcast::Receiver<(String, String, String)> {
         self.events.subscribe()
     }
 
-    pub fn snapshot(&self) -> MonitorSnapshot {
-        self.active_id
-            .as_ref()
+    pub fn snapshot(&self, line: &str) -> MonitorSnapshot {
+        self.active_ids
+            .get(line)
             .and_then(|id| self.sessions.get(id))
             .cloned()
+            .map(Box::new)
             .map(MonitorSnapshot::Active)
             .unwrap_or_else(|| MonitorSnapshot::Idle {
                 status: "idle",
@@ -126,15 +144,18 @@ impl MonitorHub {
 
     pub fn begin(
         &mut self,
+        line: String,
         session_id: String,
         disclosure_given: bool,
         source: &str,
     ) -> MonitorSession {
         let now = now_millis();
+        let key = room_key(&line, &session_id);
         let session = self
             .sessions
-            .entry(session_id.clone())
+            .entry(key.clone())
             .or_insert_with(|| MonitorSession {
+                line: line.clone(),
                 session_id: session_id.clone(),
                 source: source.to_owned(),
                 handoff_status: "connected".to_owned(),
@@ -148,6 +169,7 @@ impl MonitorHub {
                 error: None,
                 seen_signals: HashSet::new(),
             });
+        session.line = line.clone();
         session.source = source.to_owned();
         session.handoff_status = "connected".to_owned();
         session.monitor_status = "monitoring".to_owned();
@@ -155,7 +177,7 @@ impl MonitorHub {
         session.ai_muted = true;
         session.updated_at = now;
         session.error = None;
-        self.active_id = Some(session_id);
+        self.active_ids.insert(line, key);
         let result = session.clone();
         self.publish("handoff", &result);
         result
@@ -163,6 +185,7 @@ impl MonitorHub {
 
     pub fn ingest(
         &mut self,
+        line: String,
         session_id: String,
         sequence: Option<i64>,
         role: String,
@@ -172,10 +195,11 @@ impl MonitorHub {
         if !matches!(role.as_str(), "caller" | "staff") || text.trim().is_empty() {
             anyhow::bail!("caller/staff role and text are required");
         }
-        if !self.sessions.contains_key(&session_id) {
-            self.begin(session_id.clone(), false, source);
+        let key = room_key(&line, &session_id);
+        if !self.sessions.contains_key(&key) {
+            self.begin(line.clone(), session_id.clone(), false, source);
         }
-        let session = self.sessions.get_mut(&session_id).expect("session exists");
+        let session = self.sessions.get_mut(&key).expect("session exists");
         let now = now_millis();
         let cleaned: String = text
             .split_whitespace()
@@ -186,6 +210,15 @@ impl MonitorHub {
             .collect();
         session.updated_at = now;
         session.ai_muted = true;
+        if session
+            .transcript
+            .iter()
+            .rev()
+            .take(6)
+            .any(|turn| turn.role == role && similar_caption(&turn.text, &cleaned))
+        {
+            return Ok(session.clone());
+        }
         session.transcript.push(MonitorTurn {
             id: format!(
                 "{}:{}",
@@ -210,13 +243,20 @@ impl MonitorHub {
                 }],
                 ..Default::default()
             };
-            let decision = evaluate(&context);
-            let new_signals: Vec<_> = decision
-                .signals
+            let new_signals: Vec<_> = detect_signals(&context)
                 .into_iter()
                 .filter(|signal| session.seen_signals.insert(*signal))
                 .collect();
-            if decision.risk_level == RiskLevel::Red && !new_signals.is_empty() {
+            let high_risk = new_signals.iter().any(|signal| {
+                matches!(
+                    signal,
+                    RiskSignal::PaymentOrAccountChange
+                        | RiskSignal::CredentialOrMfaRequest
+                        | RiskSignal::RemoteAccessRequest
+                        | RiskSignal::CoerciveUrgency
+                )
+            });
+            if high_risk {
                 let primary = new_signals
                     .iter()
                     .copied()
@@ -252,24 +292,33 @@ impl MonitorHub {
         Ok(result)
     }
 
-    pub fn ring(
-        &mut self,
-        session_id: String,
-        disclosure_given: bool,
-        caller_name: Option<String>,
-        requested_action: Option<String>,
-        offer: Value,
-        source: &str,
-    ) -> anyhow::Result<HandoffRoom> {
+    pub fn ring(&mut self, params: RingParams) -> anyhow::Result<HandoffRoom> {
+        let RingParams {
+            line,
+            session_id,
+            disclosure_given,
+            caller_name,
+            requested_action,
+            caption_key,
+            offer,
+            source,
+        } = params;
         validate_sdp(&offer, "offer")?;
-        if let Some(existing) = self.rooms.get(&session_id) {
+        let key = room_key(&line, &session_id);
+        if let Some(existing) = self.rooms.get(&key) {
             if existing.status != "ended" && existing.offer.is_some() {
                 return Ok(existing.clone());
             }
         }
-        let session =
-            self.begin_with_status(session_id.clone(), disclosure_given, source, "ringing");
+        let session = self.begin_with_status(
+            line.clone(),
+            session_id.clone(),
+            disclosure_given,
+            source,
+            "ringing",
+        );
         let room = HandoffRoom {
+            line: line.clone(),
             session_id: session_id.clone(),
             status: "ringing".to_owned(),
             disclosure_given,
@@ -279,15 +328,18 @@ impl MonitorHub {
             answer: None,
             caller_ice: Vec::new(),
             staff_ice: Vec::new(),
+            caption_key,
+            ended_at: None,
         };
-        self.rooms.insert(session_id, room.clone());
+        self.rooms.insert(key, room.clone());
         self.publish("handoff", &session);
-        self.publish_json("incoming", &room);
+        self.publish_json(&line, "incoming", &room);
         Ok(room)
     }
 
     pub fn signal(
         &mut self,
+        line: String,
         session_id: String,
         from: String,
         kind: String,
@@ -296,7 +348,8 @@ impl MonitorHub {
         if !matches!(from.as_str(), "caller" | "staff") {
             anyhow::bail!("from must be caller or staff");
         }
-        if !self.rooms.contains_key(&session_id) {
+        let key = room_key(&line, &session_id);
+        if !self.rooms.contains_key(&key) {
             anyhow::bail!("no ringing handoff for this session");
         }
         match kind.as_str() {
@@ -305,15 +358,16 @@ impl MonitorHub {
                     anyhow::bail!("only staff can answer");
                 }
                 validate_sdp(&payload, "answer")?;
-                let room = self.rooms.get_mut(&session_id).expect("room exists");
+                let room = self.rooms.get_mut(&key).expect("room exists");
                 if room.answer.is_some() && room.status != "ended" {
                     anyhow::bail!("this handoff was already answered");
                 }
                 room.answer = Some(payload.clone());
                 room.status = "connected".to_owned();
+                room.ended_at = None;
             }
             "ice" => {
-                let room = self.rooms.get_mut(&session_id).expect("room exists");
+                let room = self.rooms.get_mut(&key).expect("room exists");
                 let bucket = if from == "caller" {
                     &mut room.caller_ice
                 } else {
@@ -326,9 +380,10 @@ impl MonitorHub {
             }
             _ => anyhow::bail!("kind must be answer or ice"),
         }
-        let room = self.rooms.get(&session_id).expect("room exists").clone();
+        let room = self.rooms.get(&key).expect("room exists").clone();
         if kind == "answer" {
             let session = self.begin_with_status(
+                line.clone(),
                 session_id.clone(),
                 room.disclosure_given,
                 "browser-handoff",
@@ -337,6 +392,7 @@ impl MonitorHub {
             self.publish("handoff", &session);
         }
         self.publish_json(
+            &line,
             "signal",
             &serde_json::json!({
                 "sessionId": session_id,
@@ -349,20 +405,28 @@ impl MonitorHub {
         Ok(room)
     }
 
-    pub fn hangup(&mut self, session_id: String, from: &str) -> anyhow::Result<HandoffRoom> {
+    pub fn hangup(
+        &mut self,
+        line: String,
+        session_id: String,
+        from: &str,
+    ) -> anyhow::Result<HandoffRoom> {
+        let key = room_key(&line, &session_id);
         let room = self
             .rooms
-            .get_mut(&session_id)
+            .get_mut(&key)
             .ok_or_else(|| anyhow::anyhow!("no handoff for this session"))?;
         room.status = "ended".to_owned();
+        room.ended_at = Some(now_millis());
         let result = room.clone();
-        if let Some(session) = self.sessions.get_mut(&session_id) {
+        if let Some(session) = self.sessions.get_mut(&key) {
             session.handoff_status = "ended".to_owned();
             session.updated_at = now_millis();
             let session = session.clone();
             self.publish("handoff", &session);
         }
         self.publish_json(
+            &line,
             "hangup",
             &serde_json::json!({
                 "sessionId": session_id,
@@ -373,22 +437,36 @@ impl MonitorHub {
         Ok(result)
     }
 
-    pub fn room(&self, session_id: &str) -> Option<HandoffRoom> {
-        self.rooms.get(session_id).cloned()
+    pub fn room(&self, line: &str, session_id: &str) -> Option<HandoffRoom> {
+        self.rooms.get(&room_key(line, session_id)).cloned()
+    }
+
+    pub fn accepts_captions(&self, line: &str, session_id: &str, caption_key: &str) -> bool {
+        self.room(line, session_id).is_some_and(|room| {
+            let recently_ended = room
+                .ended_at
+                .is_some_and(|ended_at| now_millis().saturating_sub(ended_at) <= 30_000);
+            (room.status == "connected" || recently_ended)
+                && !caption_key.is_empty()
+                && room.caption_key == caption_key
+        })
     }
 
     fn begin_with_status(
         &mut self,
+        line: String,
         session_id: String,
         disclosure_given: bool,
         source: &str,
         handoff_status: &str,
     ) -> MonitorSession {
         let now = now_millis();
+        let key = room_key(&line, &session_id);
         let session = self
             .sessions
-            .entry(session_id.clone())
+            .entry(key.clone())
             .or_insert_with(|| MonitorSession {
+                line: line.clone(),
                 session_id: session_id.clone(),
                 source: source.to_owned(),
                 handoff_status: handoff_status.to_owned(),
@@ -402,6 +480,7 @@ impl MonitorHub {
                 error: None,
                 seen_signals: HashSet::new(),
             });
+        session.line = line.clone();
         session.source = source.to_owned();
         session.handoff_status = handoff_status.to_owned();
         session.monitor_status = "monitoring".to_owned();
@@ -409,21 +488,28 @@ impl MonitorHub {
         session.ai_muted = true;
         session.updated_at = now;
         session.error = None;
-        self.active_id = Some(session_id);
+        self.active_ids.insert(line, key);
         session.clone()
     }
 
-    fn publish_json(&self, event: &str, value: &impl Serialize) {
+    fn publish_json(&self, line: &str, event: &str, value: &impl Serialize) {
         if let Ok(json) = serde_json::to_string(value) {
-            let _ = self.events.send((event.to_owned(), json));
+            let _ = self.events.send((line.to_owned(), event.to_owned(), json));
         }
     }
 
-    pub fn fail(&mut self, session_id: String, reason: String, source: &str) -> MonitorSession {
-        if !self.sessions.contains_key(&session_id) {
-            self.begin(session_id.clone(), false, source);
+    pub fn fail(
+        &mut self,
+        line: String,
+        session_id: String,
+        reason: String,
+        source: &str,
+    ) -> MonitorSession {
+        let key = room_key(&line, &session_id);
+        if !self.sessions.contains_key(&key) {
+            self.begin(line.clone(), session_id.clone(), false, source);
         }
-        let session = self.sessions.get_mut(&session_id).expect("session exists");
+        let session = self.sessions.get_mut(&key).expect("session exists");
         session.handoff_status = "connected".to_owned();
         session.monitor_status = "degraded".to_owned();
         session.ai_muted = true;
@@ -436,9 +522,15 @@ impl MonitorHub {
 
     fn publish(&self, event: &str, session: &MonitorSession) {
         if let Ok(json) = serde_json::to_string(session) {
-            let _ = self.events.send((event.to_owned(), json));
+            let _ = self
+                .events
+                .send((session.line.clone(), event.to_owned(), json));
         }
     }
+}
+
+fn room_key(line: &str, session_id: &str) -> String {
+    format!("{line}\u{1f}{session_id}")
 }
 
 fn validate_sdp(value: &Value, kind: &str) -> anyhow::Result<()> {
@@ -454,6 +546,18 @@ fn validate_sdp(value: &Value, kind: &str) -> anyhow::Result<()> {
         anyhow::bail!("SDP type must be {kind}");
     }
     Ok(())
+}
+
+fn similar_caption(existing: &str, incoming: &str) -> bool {
+    if existing == incoming {
+        return true;
+    }
+    let (shorter, longer) = if existing.len() <= incoming.len() {
+        (existing, incoming)
+    } else {
+        (incoming, existing)
+    };
+    !shorter.is_empty() && longer.starts_with(shorter) && longer.len() - shorter.len() < 24
 }
 
 fn signal_label(signal: RiskSignal) -> &'static str {

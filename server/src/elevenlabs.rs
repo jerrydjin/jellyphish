@@ -22,7 +22,7 @@ impl ElevenLabsClient {
         self.api_key.is_some()
     }
 
-    pub async fn conversations(&self) -> anyhow::Result<Value> {
+    pub async fn conversations(&self, agent_id: Option<&str>) -> anyhow::Result<Value> {
         let fields = [
             "route",
             "caller_name",
@@ -37,7 +37,7 @@ impl ElevenLabsClient {
         {
             let mut query = url.query_pairs_mut();
             query
-                .append_pair("agent_id", &self.agent_id)
+                .append_pair("agent_id", agent_id.unwrap_or(&self.agent_id))
                 .append_pair("page_size", "30")
                 .append_pair("summary_mode", "include")
                 .append_pair("sort_direction", "desc");
@@ -119,6 +119,53 @@ impl ElevenLabsClient {
         }))
     }
 
+    pub async fn transcribe_audio(
+        &self,
+        bytes: Vec<u8>,
+        content_type: &str,
+        file_name: &str,
+    ) -> anyhow::Result<String> {
+        let key = self
+            .api_key
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("ELEVENLABS_API_KEY is missing"))?;
+        if bytes.len() < 200 {
+            return Ok(String::new());
+        }
+        let mime = content_type
+            .split(';')
+            .next()
+            .unwrap_or("application/octet-stream")
+            .trim();
+        let part = reqwest::multipart::Part::bytes(bytes)
+            .file_name(file_name.to_owned())
+            .mime_str(if mime.is_empty() {
+                "application/octet-stream"
+            } else {
+                mime
+            })?;
+        let form = reqwest::multipart::Form::new()
+            .text("model_id", "scribe_v2")
+            .text("language_code", "eng")
+            .text("tag_audio_events", "false")
+            .part("file", part);
+        let url = reqwest::Url::parse("https://api.elevenlabs.io/v1/speech-to-text")?;
+        let response = self
+            .client
+            .post(url)
+            .timeout(std::time::Duration::from_secs(20))
+            .header("xi-api-key", key)
+            .multipart(form)
+            .send()
+            .await?;
+        let status = response.status();
+        let body: Value = response.json().await.unwrap_or_default();
+        if !status.is_success() {
+            anyhow::bail!("ElevenLabs returned {}: {}", status, body["detail"]);
+        }
+        Ok(spoken_transcript(&body))
+    }
+
     async fn get(&self, url: reqwest::Url) -> anyhow::Result<Value> {
         let key = self
             .api_key
@@ -137,6 +184,17 @@ impl ElevenLabsClient {
         }
         Ok(body)
     }
+}
+
+fn spoken_transcript(body: &Value) -> String {
+    let raw = body["text"].as_str().unwrap_or_default().trim();
+    if raw.is_empty() {
+        return String::new();
+    }
+    if raw.starts_with('(') && raw.ends_with(')') && !raw[1..raw.len() - 1].contains(' ') {
+        return String::new();
+    }
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn data_collection(raw: &Value) -> Value {

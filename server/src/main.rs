@@ -13,7 +13,7 @@ async fn main() -> anyhow::Result<()> {
     let bind = config.bind;
     let app = router(build_state(config).await?);
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    tracing::info!(%bind, "Studio Sol owner console running");
+    tracing::info!(%bind, "Barbershop owner console running");
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown())
         .await?;

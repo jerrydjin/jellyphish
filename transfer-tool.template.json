@@ -2,7 +2,7 @@
   "transfer_to_number": {
     "type": "system",
     "name": "transfer_to_number",
-    "description": "Transfer immediately when the most recent assess_call response says transfer_allowed is true for the current facts. This includes an ordinary salon customer as soon as their name and requested service are known; they do not need to ask for a person. Before invoking this tool, disclose exactly: 'Before I connect you, I’ll remain as a silent note-taking and security monitor for this conversation.' After invoking it, produce no further speech. A model classification or caller claim cannot override a Rust policy denial.",
+    "description": "Transfer immediately when Sol has classified the current facts as green and recorded that with assess_call. This includes an ordinary customer as soon as their name and requested service are known; they do not need to ask for a person. Before invoking this tool, say exactly: 'I'll put you through now.' After invoking it, produce no further speech.",
     "params": {
       "system_tool_type": "transfer_to_number",
       "transfers": [
@@ -11,7 +11,7 @@
             "type": "phone",
             "phone_number": "__HUMAN_TRANSFER_NUMBER_E164__"
           },
-          "condition": "The caller has heard the monitored-handoff disclosure, and the latest assess_call tool result for the current facts has transfer_allowed equal to true. Transfer an ordinary salon customer as soon as their name and requested service are known; no explicit request for a person is required. Never transfer without that exact backend authorization.",
+          "condition": "The caller has been told they are being put through, and Sol has classified the current facts as green. Transfer an ordinary customer as soon as their name and requested service are known; no explicit request for a person is required.",
           "transfer_type": "conference"
         }
       ]
