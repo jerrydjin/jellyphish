@@ -70,6 +70,7 @@ pub struct RiskDecision {
     pub allowed_actions: Vec<AllowedAction>,
     pub transfer_allowed: bool,
     pub proposed_action_allowed: Option<bool>,
+    pub next_step: String,
     pub reasons: Vec<String>,
 }
 
@@ -180,6 +181,12 @@ pub fn evaluate(context: &CallerContext) -> RiskDecision {
     let proposed_action_allowed = context
         .proposed_action
         .map(|action| allowed_actions.contains(&action));
+    let next_step = match risk_level {
+        RiskLevel::Green => "Give the monitored-handoff disclosure and transfer immediately using transfer_to_human in the browser demo or transfer_to_number on a phone call. If neither tool is available, state that the call is approved but this demo line cannot connect staff; do not ask another booking question.",
+        RiskLevel::Amber => "Ask exactly one permitted verification question, then assess again; do not transfer.",
+        RiskLevel::Red => "Play along with one short stall: fake a useless action, give obviously bogus salon details, or ask one harmless verification question. Do not refuse, transfer, or actually help the request.",
+    }
+    .to_owned();
     let reasons = match risk_level {
         RiskLevel::Green => vec!["No deterministic risk signal was found.".to_owned()],
         RiskLevel::Amber => {
@@ -194,6 +201,7 @@ pub fn evaluate(context: &CallerContext) -> RiskDecision {
         allowed_actions,
         transfer_allowed,
         proposed_action_allowed,
+        next_step,
         reasons,
     }
 }
@@ -240,6 +248,25 @@ mod tests {
         assert_eq!(decision.risk_level, RiskLevel::Green);
         assert!(decision.transfer_allowed);
         assert_eq!(decision.proposed_action_allowed, Some(true));
+        assert!(decision.next_step.contains("transfer immediately"));
+    }
+
+    #[test]
+    fn named_haircut_request_is_ready_for_immediate_handoff() {
+        let mut input = context(
+            "My name is Jamie and I would like a haircut",
+            Some(AllowedAction::Transfer),
+        );
+        input.caller_name = Some("Jamie".to_owned());
+        let decision = evaluate(&input);
+        assert_eq!(decision.risk_level, RiskLevel::Green);
+        assert!(decision.transfer_allowed);
+        assert_eq!(decision.proposed_action_allowed, Some(true));
+        assert!(
+            decision
+                .next_step
+                .contains("do not ask another booking question")
+        );
     }
 
     #[test]
@@ -265,6 +292,11 @@ mod tests {
         assert_eq!(decision.risk_level, RiskLevel::Red);
         assert!(!decision.transfer_allowed);
         assert!(decision.signals.contains(&RiskSignal::RemoteAccessRequest));
+        assert!(
+            decision
+                .next_step
+                .contains("Play along with one short stall")
+        );
     }
 
     #[test]

@@ -22,6 +22,18 @@ if (!currentResponse.ok) throw new Error(`Reading agent failed (${currentRespons
 const current = await currentResponse.json();
 
 current.conversation_config.agent.prompt.prompt = prompt;
+const sourceTools = source.conversation_config.agent.prompt.tools || [];
+const currentTools = (current.conversation_config.agent.prompt.tools || []).filter(
+  ({ name, type }) => type !== "client" || !["assess_call", "assess_call_browser"].includes(name),
+);
+for (const sourceTool of sourceTools) {
+  const index = currentTools.findIndex(({ name }) => name === sourceTool.name);
+  if (index >= 0) currentTools[index] = sourceTool;
+  else currentTools.push(sourceTool);
+}
+current.conversation_config.agent.prompt.tools = currentTools;
+// Agent reads may include both resolved tools and their IDs; updates accept only one representation.
+delete current.conversation_config.agent.prompt.tool_ids;
 const endCallDescription = source.conversation_config.agent.prompt.built_in_tools.end_call.description;
 for (const tool of current.conversation_config.agent.prompt.tools || []) {
   if (tool.name === "end_call") tool.description = endCallDescription;
@@ -34,6 +46,8 @@ current.platform_settings.guardrails = {
   ...current.platform_settings.guardrails,
   ...source.platform_settings.guardrails,
 };
+if (!current.conversation_config.conversation) current.conversation_config.conversation = {};
+current.conversation_config.conversation.client_events = source.conversation_config.conversation.client_events;
 
 const updateResponse = await fetch(endpoint, {
   method: "PATCH",
@@ -41,7 +55,7 @@ const updateResponse = await fetch(endpoint, {
   body: JSON.stringify({
     conversation_config: current.conversation_config,
     platform_settings: current.platform_settings,
-    version_description: "Prevent spoken internal reasoning and end calls promptly",
+    version_description: "Play-along red distraction and browser human handoff",
   }),
 });
 if (!updateResponse.ok) throw new Error(`Updating agent failed (${updateResponse.status}): ${await updateResponse.text()}`);
@@ -53,16 +67,24 @@ const deployedPrompt = verified.conversation_config?.agent?.prompt?.prompt || ""
 const guardrails = verified.platform_settings?.guardrails;
 const speechGuardrail = guardrails?.custom?.config?.configs?.find(({ name }) => name === "Caller-facing speech only");
 const deployedEndCall = (verified.conversation_config?.agent?.prompt?.tools || []).find(({ name }) => name === "end_call");
+const deployedAssessment = (verified.conversation_config?.agent?.prompt?.tools || []).find(({ name }) => name === "assess_call_browser");
+const deployedTransfer = (verified.conversation_config?.agent?.prompt?.tools || []).find(({ name }) => name === "transfer_to_human");
+const deployedEvents = verified.conversation_config?.conversation?.client_events || [];
 if (
   deployedPrompt !== prompt ||
   !guardrails?.focus?.is_enabled ||
   !speechGuardrail?.is_enabled ||
   speechGuardrail.execution_mode !== "blocking" ||
   speechGuardrail.trigger_action?.type !== "retry" ||
-  deployedEndCall?.description !== endCallDescription
+  deployedEndCall?.description !== endCallDescription ||
+  deployedAssessment?.type !== "client" ||
+  deployedAssessment?.expects_response !== true ||
+  deployedTransfer?.type !== "client" ||
+  deployedTransfer?.expects_response !== true ||
+  !["tentative_user_transcript", "internal_tentative_agent_response", "agent_response"].every((name) => deployedEvents.includes(name))
 ) {
   throw new Error("Agent update returned successfully but the deployed safety settings did not verify");
 }
 
 const hash = crypto.createHash("sha256").update(deployedPrompt).digest("hex").slice(0, 12);
-console.log(`Deployed and verified ${agentId}: prompt ${hash}, focus guardrail on, caller-facing guardrail on.`);
+console.log(`Deployed and verified ${agentId}: prompt ${hash}, assess_call_browser and transfer_to_human on, caller-facing guardrails on.`);

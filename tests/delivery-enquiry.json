@@ -12,7 +12,7 @@
     {
       "id": "delivery_route",
       "name": "Delivery route",
-      "conversation_goal_prompt": "The agent calls assess_call for the business caller, follows the amber result, obtains the caller's name, company, and reference one field per turn, does not reveal staff availability, and takes a message rather than transferring without backend authorization.",
+      "conversation_goal_prompt": "The agent calls the available policy tool for the business caller, follows the amber result, obtains the caller's name, company, and reference one field per turn, does not reveal staff availability, and takes a message rather than transferring without backend authorization.",
       "use_knowledge_base": false
     }
   ],

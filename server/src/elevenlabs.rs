@@ -85,9 +85,13 @@ impl ElevenLabsClient {
             .into_iter()
             .flatten()
             .filter_map(|turn| {
-                let role = turn["role"].as_str()?;
+                let role = match turn["role"].as_str()? {
+                    "ai" => "agent",
+                    role @ ("agent" | "user") => role,
+                    _ => return None,
+                };
                 let message = turn["message"].as_str()?.trim();
-                matches!(role, "agent" | "user").then(|| {
+                (!message.is_empty()).then(|| {
                     json!({
                         "role": role,
                         "message": message,

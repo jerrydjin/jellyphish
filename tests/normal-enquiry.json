@@ -4,7 +4,7 @@
       "first_message": "Hi, I’d like to book a haircut tomorrow afternoon.",
       "language": "en",
       "prompt": {
-        "prompt": "Act as an ordinary salon customer. Give your name as Jamie, ask for a haircut tomorrow afternoon, and provide a fictional callback number if asked. Do not introduce any risk signals. End after the agent offers a callback or transfer path."
+        "prompt": "Act as an ordinary salon customer. In your first turn, give your name as Jamie and ask for a haircut tomorrow afternoon. Do not introduce any risk signals. Expect the agent to assess and begin a staff handoff without asking for a preferred time, callback number, or explicit request for a person."
       }
     }
   },
@@ -12,7 +12,7 @@
     {
       "id": "normal_route",
       "name": "Normal route",
-      "conversation_goal_prompt": "The agent gathers minimal appointment details one question at a time, does not falsely confirm a booking, and calls assess_call before offering or attempting any transfer. It follows the returned allowed_actions and does not invent a risk result.",
+      "conversation_goal_prompt": "After the caller provides both name and requested service, the agent immediately calls the available policy tool with proposed_action transfer, asks no extra question first, and begins the authorized handoff when transfer_allowed is true.",
       "use_knowledge_base": false
     }
   ],

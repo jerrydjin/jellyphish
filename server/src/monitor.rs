@@ -1,6 +1,7 @@
 use crate::db::now_millis;
 use risk_core::{CallerContext, RiskLevel, RiskSignal, TranscriptTurn, evaluate, recommendation};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::broadcast;
 
@@ -68,17 +69,38 @@ pub enum MonitorSnapshot {
     Active(MonitorSession),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HandoffRoom {
+    #[serde(rename = "sessionId")]
+    pub session_id: String,
+    pub status: String,
+    #[serde(rename = "disclosureGiven")]
+    pub disclosure_given: bool,
+    #[serde(rename = "callerName")]
+    pub caller_name: Option<String>,
+    #[serde(rename = "requestedAction")]
+    pub requested_action: Option<String>,
+    pub offer: Option<Value>,
+    pub answer: Option<Value>,
+    #[serde(rename = "callerIce")]
+    pub caller_ice: Vec<Value>,
+    #[serde(rename = "staffIce")]
+    pub staff_ice: Vec<Value>,
+}
+
 pub struct MonitorHub {
     sessions: HashMap<String, MonitorSession>,
+    rooms: HashMap<String, HandoffRoom>,
     active_id: Option<String>,
     events: broadcast::Sender<(String, String)>,
 }
 
 impl Default for MonitorHub {
     fn default() -> Self {
-        let (events, _) = broadcast::channel(64);
+        let (events, _) = broadcast::channel(256);
         Self {
             sessions: HashMap::new(),
+            rooms: HashMap::new(),
             active_id: None,
             events,
         }
@@ -230,6 +252,173 @@ impl MonitorHub {
         Ok(result)
     }
 
+    pub fn ring(
+        &mut self,
+        session_id: String,
+        disclosure_given: bool,
+        caller_name: Option<String>,
+        requested_action: Option<String>,
+        offer: Value,
+        source: &str,
+    ) -> anyhow::Result<HandoffRoom> {
+        validate_sdp(&offer, "offer")?;
+        if let Some(existing) = self.rooms.get(&session_id) {
+            if existing.status != "ended" && existing.offer.is_some() {
+                return Ok(existing.clone());
+            }
+        }
+        let session =
+            self.begin_with_status(session_id.clone(), disclosure_given, source, "ringing");
+        let room = HandoffRoom {
+            session_id: session_id.clone(),
+            status: "ringing".to_owned(),
+            disclosure_given,
+            caller_name,
+            requested_action,
+            offer: Some(offer),
+            answer: None,
+            caller_ice: Vec::new(),
+            staff_ice: Vec::new(),
+        };
+        self.rooms.insert(session_id, room.clone());
+        self.publish("handoff", &session);
+        self.publish_json("incoming", &room);
+        Ok(room)
+    }
+
+    pub fn signal(
+        &mut self,
+        session_id: String,
+        from: String,
+        kind: String,
+        payload: Value,
+    ) -> anyhow::Result<HandoffRoom> {
+        if !matches!(from.as_str(), "caller" | "staff") {
+            anyhow::bail!("from must be caller or staff");
+        }
+        if !self.rooms.contains_key(&session_id) {
+            anyhow::bail!("no ringing handoff for this session");
+        }
+        match kind.as_str() {
+            "answer" => {
+                if from != "staff" {
+                    anyhow::bail!("only staff can answer");
+                }
+                validate_sdp(&payload, "answer")?;
+                let room = self.rooms.get_mut(&session_id).expect("room exists");
+                if room.answer.is_some() && room.status != "ended" {
+                    anyhow::bail!("this handoff was already answered");
+                }
+                room.answer = Some(payload.clone());
+                room.status = "connected".to_owned();
+            }
+            "ice" => {
+                let room = self.rooms.get_mut(&session_id).expect("room exists");
+                let bucket = if from == "caller" {
+                    &mut room.caller_ice
+                } else {
+                    &mut room.staff_ice
+                };
+                if bucket.len() >= 40 {
+                    bucket.remove(0);
+                }
+                bucket.push(payload.clone());
+            }
+            _ => anyhow::bail!("kind must be answer or ice"),
+        }
+        let room = self.rooms.get(&session_id).expect("room exists").clone();
+        if kind == "answer" {
+            let session = self.begin_with_status(
+                session_id.clone(),
+                room.disclosure_given,
+                "browser-handoff",
+                "connected",
+            );
+            self.publish("handoff", &session);
+        }
+        self.publish_json(
+            "signal",
+            &serde_json::json!({
+                "sessionId": session_id,
+                "from": from,
+                "kind": kind,
+                "payload": payload,
+                "room": room,
+            }),
+        );
+        Ok(room)
+    }
+
+    pub fn hangup(&mut self, session_id: String, from: &str) -> anyhow::Result<HandoffRoom> {
+        let room = self
+            .rooms
+            .get_mut(&session_id)
+            .ok_or_else(|| anyhow::anyhow!("no handoff for this session"))?;
+        room.status = "ended".to_owned();
+        let result = room.clone();
+        if let Some(session) = self.sessions.get_mut(&session_id) {
+            session.handoff_status = "ended".to_owned();
+            session.updated_at = now_millis();
+            let session = session.clone();
+            self.publish("handoff", &session);
+        }
+        self.publish_json(
+            "hangup",
+            &serde_json::json!({
+                "sessionId": session_id,
+                "from": from,
+                "room": result,
+            }),
+        );
+        Ok(result)
+    }
+
+    pub fn room(&self, session_id: &str) -> Option<HandoffRoom> {
+        self.rooms.get(session_id).cloned()
+    }
+
+    fn begin_with_status(
+        &mut self,
+        session_id: String,
+        disclosure_given: bool,
+        source: &str,
+        handoff_status: &str,
+    ) -> MonitorSession {
+        let now = now_millis();
+        let session = self
+            .sessions
+            .entry(session_id.clone())
+            .or_insert_with(|| MonitorSession {
+                session_id: session_id.clone(),
+                source: source.to_owned(),
+                handoff_status: handoff_status.to_owned(),
+                monitor_status: "monitoring".to_owned(),
+                disclosure_given,
+                ai_muted: true,
+                started_at: now,
+                updated_at: now,
+                transcript: Vec::new(),
+                alerts: Vec::new(),
+                error: None,
+                seen_signals: HashSet::new(),
+            });
+        session.source = source.to_owned();
+        session.handoff_status = handoff_status.to_owned();
+        session.monitor_status = "monitoring".to_owned();
+        session.disclosure_given = disclosure_given;
+        session.ai_muted = true;
+        session.updated_at = now;
+        session.error = None;
+        self.active_id = Some(session_id);
+        session.clone()
+    }
+
+    fn publish_json(&self, event: &str, value: &impl Serialize) {
+        if let Ok(json) = serde_json::to_string(value) {
+            let _ = self.events.send((event.to_owned(), json));
+        }
+    }
+
     pub fn fail(&mut self, session_id: String, reason: String, source: &str) -> MonitorSession {
         if !self.sessions.contains_key(&session_id) {
             self.begin(session_id.clone(), false, source);
@@ -250,6 +439,21 @@ impl MonitorHub {
             let _ = self.events.send((event.to_owned(), json));
         }
     }
+}
+
+fn validate_sdp(value: &Value, kind: &str) -> anyhow::Result<()> {
+    let sdp = value.get("sdp").and_then(Value::as_str).unwrap_or_default();
+    let sdp_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if sdp.is_empty() || sdp.len() > 32_000 {
+        anyhow::bail!("a valid SDP {kind} is required");
+    }
+    if sdp_type != kind {
+        anyhow::bail!("SDP type must be {kind}");
+    }
+    Ok(())
 }
 
 fn signal_label(signal: RiskSignal) -> &'static str {

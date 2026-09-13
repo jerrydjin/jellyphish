@@ -45,6 +45,7 @@
       .statusbar svg { fill: currentColor; }
       .sb-icons { display: flex; align-items: center; gap: 6px; }
       .home-indicator { position: absolute; bottom: 8px; left: 50%; z-index: 40; width: 138px; height: 5px; margin-left: -69px; border-radius: 3px; background: #000; pointer-events: none; transition: background-color .3s; }
+      #handoff-remote { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
       .screen.on-call .statusbar { color: #fff; }
       .screen.on-call .home-indicator { background: #fff; }
 
@@ -356,9 +357,11 @@
         </div>
       </div>
     </div>
+    <audio id="handoff-remote" autoplay playsinline></audio>
 
     <script type="module">
       import { normalizeConversationMessage } from "/call-lifecycle.mjs";
+      import { callerPreviewFromTurns, HandoffCall } from "/handoff-call.mjs";
 
       let ConversationClient = null;
       const clientReady = import("https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.25.0/+esm")
@@ -652,6 +655,43 @@
 
       /* ---------- Calls ---------- */
       let call = null;
+      let callerHandoff = null;
+      let handoffRelease = false;
+
+      async function waitThenEndAgent(current) {
+        handoffRelease = true;
+        const deadline = Date.now() + 6000;
+        while (current.mode === "speaking" && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
+        try { await current.session?.endSession(); } catch {}
+        current.session = null;
+      }
+
+      async function startStaffHandoff(current, parameters = {}) {
+        const sessionId = current.conversationId || current.id;
+        if (!current.conversationId) current.conversationId = sessionId;
+        const preview = callerPreviewFromTurns(current.transcript);
+        callerHandoff = new HandoffCall({
+          role: "caller",
+          sessionId,
+          remoteAudio: $("handoff-remote"),
+          onState: (phase) => {
+            if (phase === "ended" || phase === "timeout") {
+              callerHandoff = null;
+              handoffRelease = false;
+              if (!current.over) finishCall(current);
+            }
+          },
+        });
+        await callerHandoff.startCaller({
+          disclosureGiven: parameters.disclosure_given !== false,
+          callerName: preview.callerName,
+          requestedAction: preview.requestedAction || parameters.requested_action || "",
+        });
+        waitThenEndAgent(current);
+        return { status: "ringing" };
+      }
 
       function startCall(contact) {
         if (call) return;
@@ -691,6 +731,9 @@
           const session = await ConversationClient.startSession({
             agentId: LINES[current.line].agentId,
             connectionType: "webrtc",
+            clientTools: {
+              transfer_to_human: async (parameters = {}) => startStaffHandoff(current, parameters),
+            },
             onConnect: ({ conversationId }) => {
               if (conversationId) current.conversationId = conversationId;
               markConnected(current);
@@ -698,10 +741,15 @@
             onStatusChange: ({ status }) => {
               if (status === "connected") markConnected(current);
               // Before pickup, a "disconnected" status means startSession is about to throw; the catch reports why.
-              if (status === "disconnected" && current.connectedAt) finishCall(current);
+              if (status === "disconnected" && current.connectedAt) {
+                current.session = null;
+                if (!handoffRelease) finishCall(current);
+              }
             },
             onDisconnect: (details) => {
               console.warn("[phone] call disconnected", details);
+              current.session = null;
+              if (handoffRelease) return;
               const failed = details?.reason === "error";
               if (failed) current.error ||= details?.message;
               finishCall(current, failed || !current.connectedAt ? "Call Failed" : "Call Ended");
@@ -763,6 +811,10 @@
         current.endLabel = label;
         current.timers.forEach((timer) => { clearInterval(timer); clearTimeout(timer); });
         stopTones();
+        handoffRelease = false;
+        const handoff = callerHandoff;
+        callerHandoff = null;
+        if (handoff) Promise.resolve(handoff.hangup()).catch(() => {});
         if (current.line) {
           current.status = "ended";
           publish(current, { keepalive: true });
@@ -814,10 +866,22 @@
         navigator.sendBeacon(`/api/live/${call.line}`, new Blob([JSON.stringify(payload)], { type: "application/json" }));
       });
 
+      const monitorEvents = new EventSource("/api/monitor/events");
+      monitorEvents.addEventListener("signal", (event) => {
+        try { callerHandoff?.handleSignal(JSON.parse(event.data)); } catch {}
+      });
+      monitorEvents.addEventListener("hangup", (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          callerHandoff?.handleSignal({ ...payload, kind: "hangup", sessionId: payload.sessionId });
+        } catch {}
+      });
+
       function toggleMute() {
         if (!call || call.over) return;
         call.muted = !call.muted;
         call.session?.setMicMuted?.(call.muted);
+        callerHandoff?.setMuted(call.muted);
         publish(call);
         renderCall();
       }

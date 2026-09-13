@@ -24,7 +24,7 @@ use db::now_millis;
 use elevenlabs::ElevenLabsClient;
 use futures_util::{StreamExt, stream};
 use live::{LiveHub, LiveSnapshot, LiveUpdate};
-use monitor::{MonitorHub, MonitorSnapshot};
+use monitor::{HandoffRoom, MonitorHub, MonitorSnapshot};
 use risk_core::{CallerContext, RiskDecision, RiskLevel, TranscriptTurn, evaluate};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -70,6 +70,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/conversations/{id}", get(conversation))
         .route("/api/monitor/events", get(monitor_events))
         .route("/api/monitor/state", get(monitor_state))
+        .route("/api/monitor/demo", post(monitor_demo))
+        .route("/api/handoff/ring", post(handoff_ring))
+        .route("/api/handoff/signal", post(handoff_signal))
+        .route("/api/handoff/hangup", post(handoff_hangup))
+        .route("/api/handoff/transcript", post(handoff_local_transcript))
+        .route("/api/handoff/{id}", get(handoff_room))
         .route("/api/live/{line}", get(live_state).post(live_update))
         .route("/api/live/{line}/events", get(live_events))
         .route("/api/webhooks/handoff", post(monitor_handoff))
@@ -399,6 +405,200 @@ async fn monitor_failure(
 
 async fn monitor_state(State(state): State<AppState>) -> Json<MonitorSnapshot> {
     Json(state.monitor.read().await.snapshot())
+}
+
+async fn monitor_demo(State(state): State<AppState>) -> (StatusCode, Json<MonitorSnapshot>) {
+    let session_id = format!("demo_{}", now_millis());
+    let session = state
+        .monitor
+        .write()
+        .await
+        .begin(session_id.clone(), true, "local-demo");
+    let monitor = state.monitor.clone();
+    tokio::spawn(async move {
+        let turns = [
+            (
+                120,
+                "caller",
+                "Hi, this is Morgan from Harbour Coffee Roasters about tomorrow's delivery, reference HCR-204.",
+            ),
+            (400, "staff", "Hi Morgan, what did you need to confirm?"),
+            (
+                400,
+                "caller",
+                "Our payment details have changed, so update the bank account today.",
+            ),
+            (
+                400,
+                "caller",
+                "It must happen now or the delivery may be cancelled.",
+            ),
+        ];
+        for (sequence, (delay, role, text)) in turns.into_iter().enumerate() {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+            let _ = monitor.write().await.ingest(
+                session_id.clone(),
+                Some(sequence as i64),
+                role.to_owned(),
+                text.to_owned(),
+                "local-demo",
+            );
+        }
+    });
+    (StatusCode::ACCEPTED, Json(MonitorSnapshot::Active(session)))
+}
+
+#[derive(Debug, Deserialize)]
+struct RingRequest {
+    session_id: String,
+    #[serde(default)]
+    disclosure_given: bool,
+    caller_name: Option<String>,
+    requested_action: Option<String>,
+    offer: Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct SignalRequest {
+    session_id: String,
+    from: String,
+    kind: String,
+    payload: Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct HangupRequest {
+    session_id: String,
+    #[serde(default = "default_from")]
+    from: String,
+}
+
+fn default_from() -> String {
+    "staff".to_owned()
+}
+
+async fn handoff_ring(
+    State(state): State<AppState>,
+    Json(request): Json<RingRequest>,
+) -> Result<(StatusCode, Json<HandoffRoom>), ApiError> {
+    require_session(&request.session_id)?;
+    let room = state
+        .monitor
+        .write()
+        .await
+        .ring(
+            request.session_id.clone(),
+            request.disclosure_given,
+            request.caller_name.clone(),
+            request.requested_action.clone(),
+            request.offer,
+            "browser-handoff",
+        )
+        .map_err(handoff_error)?;
+    state
+        .store
+        .append_event(
+            &request.session_id,
+            "handoff_ring",
+            &json!({
+                "disclosure_given": request.disclosure_given,
+                "caller_name": request.caller_name,
+                "requested_action": request.requested_action,
+            }),
+            None,
+        )
+        .await?;
+    Ok((StatusCode::ACCEPTED, Json(room)))
+}
+
+async fn handoff_signal(
+    State(state): State<AppState>,
+    Json(request): Json<SignalRequest>,
+) -> Result<(StatusCode, Json<HandoffRoom>), ApiError> {
+    require_session(&request.session_id)?;
+    let room = state
+        .monitor
+        .write()
+        .await
+        .signal(
+            request.session_id,
+            request.from,
+            request.kind,
+            request.payload,
+        )
+        .map_err(handoff_error)?;
+    Ok((StatusCode::ACCEPTED, Json(room)))
+}
+
+async fn handoff_hangup(
+    State(state): State<AppState>,
+    Json(request): Json<HangupRequest>,
+) -> Result<(StatusCode, Json<HandoffRoom>), ApiError> {
+    require_session(&request.session_id)?;
+    let room = state
+        .monitor
+        .write()
+        .await
+        .hangup(request.session_id.clone(), &request.from)
+        .map_err(handoff_error)?;
+    state
+        .store
+        .append_event(
+            &request.session_id,
+            "handoff_hangup",
+            &json!({ "from": request.from }),
+            None,
+        )
+        .await?;
+    Ok((StatusCode::ACCEPTED, Json(room)))
+}
+
+async fn handoff_local_transcript(
+    State(state): State<AppState>,
+    Json(payload): Json<TranscriptPayload>,
+) -> Result<(StatusCode, Json<MonitorSnapshot>), ApiError> {
+    require_session(&payload.session_id)?;
+    let session = state
+        .monitor
+        .write()
+        .await
+        .ingest(
+            payload.session_id.clone(),
+            payload.sequence,
+            payload.role.clone(),
+            payload.text.clone(),
+            "browser-handoff",
+        )
+        .map_err(handoff_error)?;
+    Ok((StatusCode::ACCEPTED, Json(MonitorSnapshot::Active(session))))
+}
+
+async fn handoff_room(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<HandoffRoom>, ApiError> {
+    require_session(&id)?;
+    state
+        .monitor
+        .read()
+        .await
+        .room(&id)
+        .map(Json)
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::NOT_FOUND,
+                "no handoff for this session".to_owned(),
+            )
+        })
+}
+
+fn handoff_error(error: anyhow::Error) -> ApiError {
+    let message = error.to_string();
+    if message.contains("already answered") {
+        ApiError(StatusCode::CONFLICT, message)
+    } else {
+        ApiError::bad_request(message)
+    }
 }
 
 fn known_line(line: &str) -> Result<(), ApiError> {
@@ -794,5 +994,73 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn browser_handoff_rings_then_connects() {
+        let app = test_app().await;
+        let ring = serde_json::json!({
+            "session_id": "conv_staff_1",
+            "disclosure_given": true,
+            "caller_name": "Jamie",
+            "requested_action": "haircut tomorrow",
+            "offer": { "type": "offer", "sdp": "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n" }
+        });
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/handoff/ring")
+                    .header("content-type", "application/json")
+                    .body(Body::from(ring.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+        let state = app
+            .clone()
+            .oneshot(
+                Request::get("/api/monitor/state")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body: Value =
+            serde_json::from_slice(&to_bytes(state.into_body(), 64 * 1024).await.unwrap()).unwrap();
+        assert_eq!(body["handoffStatus"], "ringing");
+        assert_eq!(body["aiMuted"], true);
+
+        let answer = serde_json::json!({
+            "session_id": "conv_staff_1",
+            "from": "staff",
+            "kind": "answer",
+            "payload": { "type": "answer", "sdp": "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n" }
+        });
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/handoff/signal")
+                    .header("content-type", "application/json")
+                    .body(Body::from(answer.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+        let connected = app
+            .oneshot(
+                Request::get("/api/monitor/state")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body: Value =
+            serde_json::from_slice(&to_bytes(connected.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(body["handoffStatus"], "connected");
     }
 }
