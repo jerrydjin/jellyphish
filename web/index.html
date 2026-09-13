@@ -51,9 +51,18 @@
       .scenario { display: flex; align-items: center; gap: 9px; padding: 10px 0; border-bottom: 1px solid var(--border); color: #454542; background: transparent; font-size: .78rem; line-height: 1.35; }
       .scenario:hover { color: #111; }
       .scenario span { flex: 0 0 auto; display: inline-grid; width: 21px; height: 21px; place-items: center; border: 1px solid #bfc0ba; border-radius: 3px; color: #555550; background: #fff; font-size: .66rem; font-weight: 400; }
-      .demo-handoff { width: 100%; margin-top: 16px; padding: 8px 0; border: 0; color: #111; background: transparent; cursor: pointer; font-size: .78rem; font-weight: 400; text-align: left; text-decoration: underline; text-underline-offset: 3px; }
+      .call-control { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+      .call-control-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 11px; color: var(--muted); font-size: .72rem; }
+      .call-control-status { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+      .call-control-status::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+      .call-control-status.live { color: var(--green); }
+      .call-toggle { width: 100%; min-height: 42px; padding: 10px 14px; border: 1px solid #111; border-radius: 3px; color: #111; background: var(--accent); cursor: pointer; font-size: .8rem; }
+      .call-toggle.end { color: #fff; background: #111; }
+      .call-toggle:disabled { border-color: var(--border-strong); color: var(--muted); background: var(--paper); cursor: wait; }
+      .call-help { min-height: 31px; margin: 9px 0 0; color: var(--subtle); font-size: .68rem; line-height: 1.45; }
+      .call-help.error { color: var(--red); }
+      .demo-handoff { width: 100%; margin-top: 12px; padding: 8px 0; border: 0; color: #111; background: transparent; cursor: pointer; font-size: .78rem; font-weight: 400; text-align: left; text-decoration: underline; text-underline-offset: 3px; }
       .demo-handoff:hover, .demo-handoff:focus-visible { color: #6a7500; outline: none; }
-      elevenlabs-convai { display: block; }
       main { min-width: 0; padding: 0 clamp(28px, 4vw, 68px) 70px; }
       .topbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 50px 0 30px; }
       h1 { max-width: 760px; margin: 0; font-size: clamp(2.35rem, 4vw, 4rem); font-weight: 400; line-height: .98; letter-spacing: -.065em; }
@@ -199,8 +208,12 @@
           <div class="scenario"><span>2</span>Call about a delivery.</div>
           <div class="scenario"><span>3</span>Demand remote POS access.</div>
         </div>
+        <section class="call-control" aria-label="Browser call controls">
+          <div class="call-control-head"><span>Browser call</span><span class="call-control-status" id="call-control-status">Ready</span></div>
+          <button class="call-toggle" id="call-toggle" type="button">Start demo call</button>
+          <p class="call-help" id="call-help">Microphone audio is used only while this call is connected.</p>
+        </section>
         <button class="demo-handoff" id="handoff-demo" type="button">Run monitored handoff</button>
-        <elevenlabs-convai agent-id="agent_1101m2b4acdnedz9y2yky3w9vwfm" variant="expanded" action-text="Talk to Sol" start-call-text="Start demo call" end-call-text="End call" listening-text="Caller speaking…" speaking-text="Sol speaking…" avatar-orb-color-1="#f2b85b" avatar-orb-color-2="#302615"></elevenlabs-convai>
       </aside>
 
       <main>
@@ -244,12 +257,27 @@
         </section>
       </main>
     </div>
-    <script src="https://unpkg.com/@elevenlabs/convai-widget-embed@0.18.2" async type="text/javascript"></script>
     <script type="module">
-      import { isEndingWidgetStatus, isRemoteConversationLive } from "./call-lifecycle.mjs";
+      import { effectiveConversationStatus, liveElapsedSeconds, normalizeConversationMessage } from "./call-lifecycle.mjs";
 
-      const state = { conversations: [], selectedId: null, live: { active: false, startedAt: 0, endedAt: 0, transcript: [], route: null }, monitor: { status: "idle" }, loadingDetail: false };
+      let ConversationClient = null;
+      let clientLoadError = null;
+      try {
+        ({ Conversation: ConversationClient } = await import("https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.25.0/+esm"));
+        document.documentElement.dataset.elevenlabsClient = "ready";
+      } catch (error) {
+        clientLoadError = error instanceof Error ? error.message : "The browser call client could not be loaded.";
+        document.documentElement.dataset.elevenlabsClient = "failed";
+      }
+
+      const AGENT_ID = "agent_1101m2b4acdnedz9y2yky3w9vwfm";
+      const ENDED_CALL_KEY = "jellyphish:last-ended-call";
+      const savedEndedCall = (() => { try { return JSON.parse(sessionStorage.getItem(ENDED_CALL_KEY) || "null"); } catch { return null; } })();
+      const state = { conversations: [], selectedId: null, endedCall: savedEndedCall, live: { active: false, sessionId: null, startedAt: 0, endedAt: 0, transcript: [], route: null }, monitor: { status: "idle" }, loadingDetail: false };
       const $ = (id) => document.getElementById(id);
+      let liveConversation = null;
+      let callTransition = null;
+      let endRequested = false;
 
       function escapeHTML(value = "") {
         return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
@@ -258,14 +286,11 @@
       function formatDuration(seconds = 0) { const m = Math.floor(seconds / 60); const s = Math.floor(seconds % 60); return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`; }
       function formatClock(unix) { return unix ? new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" }).format(new Date(unix * 1000)) : "Now"; }
       function displayTitle(call) { return call.title || call.data?.requested_action || (routeOf(call) === "red" ? "Suspicious call" : "General enquiry"); }
-      function isRemoteLive(call) {
-        return isRemoteConversationLive(call, state.live.endedAt);
-      }
       let assessmentSequence = 0;
       async function assessLive() {
-        if (!state.live.transcript.length) return;
-        const sequence = ++assessmentSequence;
         const callerTurns = state.live.transcript.filter((turn) => turn.role === "user");
+        if (!callerTurns.length) return;
+        const sequence = ++assessmentSequence;
         const text = callerTurns.map((turn) => turn.message).join(" ");
         try {
           const response = await fetch("/tool/assess", {
@@ -312,7 +337,8 @@
       }
 
       function humanOutcome(call) {
-        const outcome = String(call?.data?.outcome || call?.status || "");
+        const status = effectiveConversationStatus(call, state.endedCall?.id);
+        const outcome = String(call?.data?.outcome || status || "");
         if (/caller disconnected|disconnected/i.test(outcome)) return "Call ended";
         if (/transfer/i.test(outcome)) return "Handed to staff";
         if (/message/i.test(outcome)) return "Message taken";
@@ -325,23 +351,24 @@
           const route = routeOf(call);
           const flag = route === "red" ? '<span class="call-flag red">Hold</span>' : route === "amber" ? '<span class="call-flag amber">Review</span>' : "";
           const subtitle = call.data?.outcome ? humanOutcome(call) : call.summary || humanOutcome(call);
-          return `<button class="call-row ${call.id === state.selectedId ? "selected" : ""}" data-id="${escapeHTML(call.id)}" type="button"><span class="call-copy"><span class="call-title">${escapeHTML(displayTitle(call))}</span><span class="call-sub">${escapeHTML(subtitle)}</span></span>${flag}<span class="call-time"><span class="call-time-clock">${formatClock(call.startedAt)}</span>${formatDuration(call.duration)}</span></button>`;
+          const duration = call.id === state.endedCall?.id && !call.duration ? state.endedCall.duration : call.duration;
+          return `<button class="call-row ${call.id === state.selectedId ? "selected" : ""}" data-id="${escapeHTML(call.id)}" type="button"><span class="call-copy"><span class="call-title">${escapeHTML(displayTitle(call))}</span><span class="call-sub">${escapeHTML(subtitle)}</span></span>${flag}<span class="call-time"><span class="call-time-clock">${formatClock(call.startedAt)}</span>${formatDuration(duration)}</span></button>`;
         }).join("") : `<p class="empty" style="padding:24px">No calls yet. Start one from the demo line.</p>`;
         document.querySelectorAll(".call-row").forEach((row) => row.addEventListener("click", () => selectConversation(row.dataset.id)));
       }
       function renderLive() {
-        const remote = state.conversations.find(isRemoteLive);
-        const active = state.live.active || Boolean(remote);
+        const active = state.live.active;
+        const ended = !active && Boolean(state.live.endedAt);
         const transcript = state.live.transcript;
         const route = state.live.route;
         $("live-card").classList.toggle("active", active);
-        $("live-status").textContent = active ? "Connected" : "Idle";
+        $("live-status").textContent = active ? "Connected" : ended ? "Ended" : "Idle";
         $("live-status").classList.toggle("idle", !active);
-        $("live-caption").textContent = active ? "Sol is screening this caller now" : "Waiting for the next browser call";
+        $("live-caption").textContent = active ? "Sol is screening this caller now" : ended ? "Call ended · finalizing transcript" : "Waiting for the next browser call";
         const liveLabel = route === "red" ? "Hold" : route === "amber" ? "Review" : route === "green" ? "Screened" : "Not classified";
         $("live-route").textContent = liveLabel;
         $("live-route").className = `route-pill ${route === "green" ? "" : route || ""}`;
-        $("live-lines").innerHTML = transcript.length ? transcript.slice(-8).map((turn) => `<div class="line ${escapeHTML(turn.role)}"><span class="line-role">${turn.role === "agent" ? "Sol" : "Caller"}</span><span>${escapeHTML(turn.message)}</span></div>`).join("") : `<p class="empty">${active ? "Connected. Waiting for speech…" : "Speech will appear here while the call is running."}</p>`;
+        $("live-lines").innerHTML = transcript.length ? transcript.slice(-8).map((turn) => `<div class="line ${escapeHTML(turn.role)}"><span class="line-role">${turn.role === "agent" ? "Sol" : "Caller"}</span><span>${escapeHTML(turn.message)}</span></div>`).join("") : `<p class="empty">${active ? "Connected. Waiting for speech…" : ended ? "No speech was captured before the call ended." : "Speech will appear here while the call is running."}</p>`;
         $("live-lines").scrollTop = $("live-lines").scrollHeight;
       }
       async function selectConversation(id, quiet = false) {
@@ -355,13 +382,6 @@
           const call = await response.json();
           if (!response.ok) throw new Error(call.error || "Could not load this call");
           renderDetail(call);
-          if (isRemoteLive(call) && !state.live.transcript.length) {
-            state.live.active = true;
-            state.live.startedAt ||= Date.now();
-            state.live.transcript = call.transcript || [];
-            state.live.route = call.policy?.risk_level || null;
-            renderLive(); assessLive();
-          }
         } catch (error) { $("detail").innerHTML = `<div class="error">${escapeHTML(error.message)}</div>`; }
         finally { state.loadingDetail = false; }
       }
@@ -378,45 +398,122 @@
         const factsMarkup = facts.length ? `<details class="detail-inspector"><summary>Call details</summary><div class="facts">${facts.map(([label, value]) => `<div class="fact"><small>${escapeHTML(label)}</small><span class="fact-value" title="${escapeHTML(value)}">${escapeHTML(value)}</span></div>`).join("")}</div></details>` : "";
         $("detail").innerHTML = `<div style="margin-bottom:8px"><h3 class="detail-title">${escapeHTML(call.title || "Call transcript")}</h3></div>${legacyLeak ? `<div class="notice">This older transcript predates the spoken-output firewall. The current agent passed the no-internal-monologue regression.</div>` : ""}<p class="detail-summary">${escapeHTML(call.summary || "Analysis is still processing for this call.")}</p>${factsMarkup}${call.data?.risk_signals && call.data.risk_signals !== "none" ? `<div class="risk"><span>Risk signals: </span>${escapeHTML(call.data.risk_signals)}</div>` : ""}<div class="transcript">${(call.transcript || []).map((turn) => `<div class="bubble ${escapeHTML(turn.role)}"><small>${turn.role === "agent" ? "Sol" : "Caller"} · ${formatDuration(turn.time)}${turn.interrupted ? " · interrupted" : ""}</small>${escapeHTML(turn.message)}</div>`).join("") || `<p class="empty">Transcript is not available yet.</p>`}</div>`;
       }
-      function normalizeMessage(payload) {
-        const message = payload?.message || payload?.text || payload?.user_transcript || payload?.agent_response;
-        const source = String(payload?.source || payload?.role || payload?.type || "").toLowerCase();
-        const role = source.includes("user") ? "user" : source.includes("agent") || source.includes("ai") ? "agent" : null;
-        return typeof message === "string" && role ? { role, message } : null;
+      function renderCallControl(status = state.live.active ? "connected" : "ready", error = "") {
+        const active = status === "connected" || status === "listening" || status === "speaking";
+        const busy = status === "connecting" || status === "disconnecting";
+        const labels = { ready: "Ready", connecting: "Connecting", connected: "Connected", listening: "Listening", speaking: "Sol speaking", disconnecting: "Ending" };
+        $("call-control-status").textContent = labels[status] || "Ready";
+        $("call-control-status").classList.toggle("live", active);
+        $("call-toggle").textContent = active ? "End call" : busy ? (status === "connecting" ? "Connecting…" : "Ending…") : "Start demo call";
+        $("call-toggle").classList.toggle("end", active);
+        $("call-toggle").disabled = busy;
+        $("call-help").textContent = error || (active ? "Live transcript and timer are connected to this browser session." : "Microphone audio is used only while this call is connected.");
+        $("call-help").classList.toggle("error", Boolean(error));
       }
-      function startLive() {
-        if (!state.live.active) state.live = { active: true, startedAt: Date.now(), endedAt: 0, transcript: [], route: null };
+      function startLive(sessionId) {
+        if (!state.live.active) state.live = { active: true, sessionId: sessionId || null, startedAt: Date.now(), endedAt: 0, transcript: [], route: null };
+        else if (sessionId) state.live.sessionId = sessionId;
+        renderCallControl("connected");
         renderLive(); setTimeout(refreshConversations, 1200);
       }
       function stopLive() {
-        if (!state.live.active && state.live.endedAt) return;
+        if (!state.live.active) return;
         assessmentSequence += 1;
         state.live.active = false;
         state.live.endedAt = Date.now();
+        if (state.live.sessionId) {
+          state.endedCall = { id: state.live.sessionId, duration: liveElapsedSeconds(state.live), endedAt: state.live.endedAt };
+          sessionStorage.setItem(ENDED_CALL_KEY, JSON.stringify(state.endedCall));
+        }
         renderLive();
+        renderCalls();
         setTimeout(refreshConversations, 1800);
         setTimeout(refreshConversations, 5500);
       }
-
-      const widget = document.querySelector("elevenlabs-convai");
-      widget.addEventListener("elevenlabs-convai:call", (event) => {
-        const config = event.detail?.config;
-        if (!config) return;
-        config.onConnect = startLive;
-        config.onDisconnect = stopLive;
-        config.onStatusChange = ({ status } = {}) => {
-          if (status === "connected") startLive();
-          if (isEndingWidgetStatus(status)) stopLive();
-        };
-        config.onError = () => { if (state.live.active) stopLive(); };
-        config.onMessage = (payload) => {
-          const turn = normalizeMessage(payload);
-          if (!turn) return;
-          const previous = state.live.transcript.at(-1);
-          if (previous?.role === turn.role && previous.message === turn.message) return;
-          state.live.transcript.push(turn); renderLive(); assessLive();
-        };
-      });
+      async function beginCall() {
+        if (callTransition || liveConversation) return;
+        if (!ConversationClient) {
+          renderCallControl("ready", clientLoadError || "The browser call client is unavailable. Refresh and try again.");
+          return;
+        }
+        endRequested = false;
+        renderCallControl("connecting");
+        callTransition = ConversationClient.startSession({
+          agentId: AGENT_ID,
+          connectionType: "webrtc",
+          onConnect: ({ conversationId }) => startLive(conversationId),
+          onDisconnect: () => {
+            liveConversation = null;
+            stopLive();
+            renderCallControl("ready");
+          },
+          onStatusChange: ({ status }) => {
+            if (status === "connecting") renderCallControl("connecting");
+            if (status === "connected" && !state.live.active) startLive();
+            if (status === "disconnecting") {
+              stopLive();
+              renderCallControl("disconnecting");
+            }
+            if (status === "disconnected") {
+              liveConversation = null;
+              stopLive();
+              renderCallControl("ready");
+            }
+          },
+          onModeChange: ({ mode }) => { if (state.live.active) renderCallControl(mode); },
+          onMessage: (payload) => {
+            const turn = normalizeConversationMessage(payload);
+            if (!turn) return;
+            const previous = state.live.transcript.at(-1);
+            const duplicate = turn.eventId != null
+              ? state.live.transcript.some((item) => item.eventId === turn.eventId)
+              : previous?.role === turn.role && previous.message === turn.message;
+            if (duplicate) return;
+            state.live.transcript.push(turn);
+            renderLive();
+            if (turn.role === "user") assessLive();
+          },
+          onAgentResponseCorrection: ({ original_agent_response: original, corrected_agent_response: corrected }) => {
+            const turn = [...state.live.transcript].reverse().find((item) => item.role === "agent" && item.message === original);
+            if (turn && corrected) turn.message = corrected;
+            renderLive();
+          },
+          onError: (message) => renderCallControl(state.live.active ? "connected" : "ready", String(message || "The call hit an unexpected error.")),
+        });
+        try {
+          const session = await callTransition;
+          if (endRequested) return;
+          if (session?.isOpen()) liveConversation = session;
+          else {
+            liveConversation = null;
+            stopLive();
+            renderCallControl("ready");
+          }
+        } catch (error) {
+          liveConversation = null;
+          if (state.live.active) stopLive();
+          renderCallControl("ready", error instanceof Error ? error.message : "Could not start the call.");
+        } finally {
+          callTransition = null;
+        }
+      }
+      async function endCall() {
+        endRequested = true;
+        let session = liveConversation;
+        liveConversation = null;
+        stopLive();
+        renderCallControl("disconnecting");
+        try {
+          if (!session && callTransition) session = await callTransition;
+          await Promise.race([session?.endSession(), new Promise((resolve) => setTimeout(resolve, 2500))]);
+          renderCallControl("ready");
+        } catch (error) {
+          renderCallControl("ready", error instanceof Error ? error.message : "The call ended locally, but cleanup reported an error.");
+        } finally {
+          endRequested = false;
+        }
+      }
+      $("call-toggle").addEventListener("click", () => state.live.active ? endCall() : beginCall());
       const monitorEvents = new EventSource("/api/monitor/events");
       for (const eventName of ["monitor", "handoff", "transcript", "risk-alert", "monitor-failure"]) {
         monitorEvents.addEventListener(eventName, (event) => {
@@ -452,8 +549,8 @@
           state.conversations = result.conversations || [];
           $("sync-label").textContent = `Live · updated ${new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(new Date(result.refreshedAt))}`;
           renderCalls(); renderLive();
-          const active = state.conversations.find(isRemoteLive);
-          if (active) { state.selectedId = active.id; await selectConversation(active.id, true); }
+          const current = state.live.sessionId && state.conversations.find((call) => call.id === state.live.sessionId);
+          if (current && state.selectedId !== current.id) { state.selectedId = current.id; await selectConversation(current.id, true); }
           else if (!state.selectedId && state.conversations[0]) await selectConversation(state.conversations[0].id);
           else if (state.live.active === false && previousFirst && state.conversations[0]?.id !== previousFirst) { state.selectedId = state.conversations[0].id; await selectConversation(state.selectedId); }
         } catch (error) {
@@ -462,11 +559,12 @@
         }
       }
       setInterval(() => {
-        const elapsed = state.live.active && state.live.startedAt ? Math.floor((Date.now() - state.live.startedAt) / 1000) : 0;
-        $("live-time").textContent = formatDuration(elapsed);
+        $("live-time").textContent = formatDuration(liveElapsedSeconds(state.live));
       }, 500);
       $("refresh").addEventListener("click", refreshConversations);
       renderMonitor();
+      renderCallControl();
+      renderLive();
       refreshConversations();
       setInterval(refreshConversations, 3000);
     </script>

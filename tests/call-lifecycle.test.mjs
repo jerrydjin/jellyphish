@@ -1,20 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isEndingWidgetStatus, isRemoteConversationLive } from "../web/call-lifecycle.mjs";
+import { effectiveConversationStatus, liveElapsedSeconds, normalizeConversationMessage } from "../web/call-lifecycle.mjs";
 
-test("post-call processing does not appear as a live call", () => {
-  assert.equal(isRemoteConversationLive({ status: "processing", startedAt: 20 }, 0), false);
-  assert.equal(isRemoteConversationLive({ status: "done", startedAt: 20 }, 0), false);
+test("an ended browser session overrides lagging remote statuses", () => {
+  assert.equal(effectiveConversationStatus({ id: "conv-1", status: "in-progress" }, "conv-1"), "done");
+  assert.equal(effectiveConversationStatus({ id: "conv-1", status: "processing" }, "conv-1"), "done");
+  assert.equal(effectiveConversationStatus({ id: "conv-2", status: "in-progress" }, "conv-1"), "in-progress");
 });
 
-test("a remote poll cannot resurrect the call that just ended locally", () => {
-  assert.equal(isRemoteConversationLive({ status: "in-progress", startedAt: 20 }, 20_500), false);
-  assert.equal(isRemoteConversationLive({ status: "in-progress", startedAt: 21 }, 20_500), true);
+test("the timer freezes at the local disconnect time", () => {
+  assert.equal(liveElapsedSeconds({ active: true, startedAt: 10_000, endedAt: 0 }, 31_900), 21);
+  assert.equal(liveElapsedSeconds({ active: false, startedAt: 10_000, endedAt: 31_900 }, 90_000), 21);
 });
 
-test("both widget teardown statuses end the live console session", () => {
-  assert.equal(isEndingWidgetStatus("disconnecting"), true);
-  assert.equal(isEndingWidgetStatus("disconnected"), true);
-  assert.equal(isEndingWidgetStatus("connected"), false);
+test("official ElevenLabs message payloads normalize into transcript turns", () => {
+  assert.deepEqual(normalizeConversationMessage({ role: "user", source: "user", message: " Hello ", event_id: 4 }), { role: "user", message: "Hello", eventId: 4 });
+  assert.deepEqual(normalizeConversationMessage({ role: "agent", source: "ai", message: "Hi", event_id: 5 }), { role: "agent", message: "Hi", eventId: 5 });
+  assert.deepEqual(normalizeConversationMessage({ source: "user", message: "Again" }), { role: "user", message: "Again", eventId: null });
+  assert.equal(normalizeConversationMessage({ type: "audio", message: "noise" }), null);
 });

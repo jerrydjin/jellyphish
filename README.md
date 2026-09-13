@@ -35,7 +35,7 @@ cargo +stable run -p jellyphish-server
 
 Open <http://localhost:4173>, allow microphone access, and start a demo call. The database is created at `data/jellyphish.db`.
 
-The browser widget remains the fastest demo path. A phone number is required only for a real `transfer_to_number` call.
+The inline browser control is the fastest demo path. It owns the realtime session directly, so the dashboard receives transcript and disconnect events without a floating widget covering the operator console. A phone number is required only for a real `transfer_to_number` call.
 
 ## Core API
 
@@ -113,4 +113,4 @@ Configure the workspace post-call transcription webhook to send to `/webhooks/el
 
 This repository does not include a Rust/WASM frontend, microservices, Kubernetes, a custom WebRTC stack, or Postgres. SQLite is enough for the single-business demo. A later multi-tenant deployment can move persistence behind the same `EventStore` boundary.
 
-The browser widget cannot perform a real phone transfer. Conference transfer requires an ElevenLabs-compatible Twilio or SIP number and a real destination. The current prompt and transfer template require a fresh Rust approval before transfer, but ElevenLabs still executes the system tool; production assurance should also use platform guardrails and live integration testing.
+A browser demo session cannot perform a real phone transfer. Conference transfer requires an ElevenLabs-compatible Twilio or SIP number and a real destination. The current prompt and transfer template require a fresh Rust approval before transfer, but ElevenLabs still executes the system tool; production assurance should also use platform guardrails and live integration testing.
