@@ -36,6 +36,8 @@
       .scenario-list { display: grid; gap: 9px; margin: 24px 0; }
       .scenario { padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; color: #ccc5d4; background: #1d1824; font-size: .86rem; line-height: 1.4; }
       .scenario span { display: inline-grid; width: 21px; height: 21px; margin-right: 7px; place-items: center; border-radius: 7px; color: #17131d; background: #c9c1d4; font-size: .7rem; font-weight: 800; }
+      .demo-handoff { width: 100%; margin-top: 12px; padding: 11px 13px; border: 1px solid #6f4c47; border-radius: 11px; color: #ffd9d0; background: #342126; cursor: pointer; font-weight: 700; }
+      .demo-handoff:hover, .demo-handoff:focus-visible { border-color: var(--accent); outline: none; }
       elevenlabs-convai { display: block; margin-top: 18px; }
       .privacy { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); color: #777080; font-size: .75rem; line-height: 1.5; }
 
@@ -79,6 +81,26 @@
       .line b { color: var(--muted); font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; }
       .line.agent b { color: var(--accent); }
 
+      .monitor-card { margin-bottom: 18px; border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; background: var(--panel); }
+      .monitor-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+      .monitor-title { display: flex; align-items: center; gap: 10px; }
+      .monitor-title h2 { margin: 0; font-size: 1rem; }
+      .monitor-title span { color: var(--muted); font-size: .78rem; }
+      .monitor-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, .9fr); min-height: 180px; }
+      .sidecar { padding: 18px 20px; border-right: 1px solid var(--border); }
+      .sidecar-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+      .sidecar-tag { padding: 5px 8px; border-radius: 7px; color: #aaa3b1; background: #302a37; font-size: .7rem; font-weight: 700; }
+      .sidecar-tag.ok { color: #b3efca; background: #183527; }
+      .sidecar-lines { max-height: 150px; overflow: auto; display: grid; gap: 8px; }
+      .sidecar-line { display: grid; grid-template-columns: 50px 1fr; gap: 9px; color: #d9d3df; font-size: .82rem; line-height: 1.45; }
+      .sidecar-line b { color: var(--muted); font-size: .68rem; text-transform: uppercase; }
+      .alerts { padding: 18px 20px; }
+      .alert-empty { color: #7f7788; font-size: .85rem; line-height: 1.55; }
+      .alert-card { padding: 15px; border: 1px solid #7d3938; border-radius: 13px; background: #3b2023; box-shadow: 0 0 0 1px #ff665f12; }
+      .alert-label { margin-bottom: 8px; color: #ffaaa4; font-size: .7rem; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; }
+      .alert-action { margin: 0 0 10px; color: #fff1ef; font-size: 1rem; font-weight: 760; line-height: 1.4; }
+      .alert-evidence { margin: 0; color: #d7b9ba; font-size: .78rem; line-height: 1.45; }
+
       .workspace { display: grid; grid-template-columns: minmax(360px, .9fr) minmax(380px, 1.1fr); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; background: var(--panel); }
       .calls { min-width: 0; border-right: 1px solid var(--border); }
       .section-head { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--border); }
@@ -120,6 +142,8 @@
         .workspace { grid-template-columns: 1fr; }
         .calls { border-right: 0; border-bottom: 1px solid var(--border); }
         .call-list, .detail-scroll { max-height: 460px; }
+        .monitor-grid { grid-template-columns: 1fr; }
+        .sidecar { border-right: 0; border-bottom: 1px solid var(--border); }
       }
       @media (max-width: 760px) {
         .app { display: block; }
@@ -146,6 +170,7 @@
           <div class="scenario"><span>2</span>Call about a delivery.</div>
           <div class="scenario"><span>3</span>Demand remote POS access.</div>
         </div>
+        <button class="demo-handoff" id="handoff-demo" type="button">Run monitored-handoff demo</button>
         <elevenlabs-convai agent-id="agent_1101m2b4acdnedz9y2yky3w9vwfm" variant="expanded" action-text="Talk to Sol" start-call-text="Start demo call" end-call-text="End call" listening-text="Caller speaking…" speaking-text="Sol speaking…" avatar-orb-color-1="#ff8066" avatar-orb-color-2="#6c3454"></elevenlabs-convai>
         <div class="privacy">Demo recordings and transcripts are retained by ElevenLabs for seven days. The API key stays on this local server.</div>
       </aside>
@@ -173,6 +198,19 @@
             <div class="live-lines" id="live-lines"><p class="empty">Speech will appear here while the call is running.</p></div>
           </div>
         </section>
+        <section class="monitor-card" aria-labelledby="monitor-title">
+          <div class="monitor-head">
+            <div class="monitor-title"><h2 id="monitor-title">Monitored human handoff</h2><span id="monitor-subtitle">No transferred call</span></div>
+            <span class="status-pill idle" id="monitor-status">Idle</span>
+          </div>
+          <div class="monitor-grid">
+            <div class="sidecar">
+              <div class="sidecar-meta" id="sidecar-meta"><span class="sidecar-tag">Read-only sidecar</span><span class="sidecar-tag">AI silent</span></div>
+              <div class="sidecar-lines" id="sidecar-lines"><p class="empty">A transferred caller and staff member will appear here without Sol joining the conversation.</p></div>
+            </div>
+            <div class="alerts" id="handoff-alert" aria-live="assertive"><p class="alert-empty">No post-handoff risk alert.</p></div>
+          </div>
+        </section>
         <section class="workspace" aria-label="Call history">
           <div class="calls">
             <div class="section-head"><h2>Recent calls</h2><span id="history-count">Loading…</span></div>
@@ -187,7 +225,7 @@
     </div>
     <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
     <script>
-      const state = { conversations: [], selectedId: null, live: { active: false, startedAt: 0, transcript: [], route: null }, loadingDetail: false };
+      const state = { conversations: [], selectedId: null, live: { active: false, startedAt: 0, transcript: [], route: null }, monitor: { status: "idle" }, loadingDetail: false };
       const $ = (id) => document.getElementById(id);
       const ACTIVE = new Set(["initiated", "in-progress", "processing"]);
 
@@ -204,6 +242,26 @@
         if (/remote\s*(access|support)|password|mfa|verification code|refund|payment change|account access|compromised|install/.test(text)) return "red";
         if (/delivery|supplier|purchase order|staff (schedule|available)|duty manager/.test(text)) return "amber";
         return transcript.length ? "green" : null;
+      }
+      function renderMonitor(monitor = state.monitor) {
+        const idle = !monitor?.sessionId;
+        const degraded = monitor?.monitorStatus === "degraded";
+        const active = !idle && !degraded;
+        $("monitor-status").textContent = idle ? "Idle" : degraded ? "Degraded" : "Monitoring";
+        $("monitor-status").classList.toggle("idle", idle || degraded);
+        $("monitor-subtitle").textContent = idle ? "No transferred call" : degraded ? "Transfer connected · sidecar unavailable" : `Human call · ${monitor.sessionId}`;
+        $("sidecar-meta").innerHTML = idle
+          ? `<span class="sidecar-tag">Read-only sidecar</span><span class="sidecar-tag">AI silent</span>`
+          : `<span class="sidecar-tag ${monitor.disclosureGiven ? "ok" : ""}">${monitor.disclosureGiven ? "Disclosure given" : "Disclosure missing"}</span><span class="sidecar-tag ${monitor.aiMuted ? "ok" : ""}">${monitor.aiMuted ? "AI silent" : "Check AI state"}</span><span class="sidecar-tag ${active ? "ok" : ""}">${active ? "Transcript streaming" : "Transfer preserved"}</span>`;
+        const transcript = monitor?.transcript || [];
+        $("sidecar-lines").innerHTML = transcript.length
+          ? transcript.slice(-8).map((turn) => `<div class="sidecar-line"><b>${escapeHTML(turn.role)}</b><span>${escapeHTML(turn.text)}</span></div>`).join("")
+          : `<p class="empty">${degraded ? `Monitoring failed, but the human transfer remains connected. ${escapeHTML(monitor.error || "")}` : "A transferred caller and staff member will appear here without Sol joining the conversation."}</p>`;
+        $("sidecar-lines").scrollTop = $("sidecar-lines").scrollHeight;
+        const alert = (monitor?.alerts || []).at(-1);
+        $("handoff-alert").innerHTML = alert
+          ? `<div class="alert-card"><div class="alert-label">High-risk signal · ${escapeHTML(alert.signals.map((signal) => signal.label).join(", "))}</div><p class="alert-action">${escapeHTML(alert.recommendedAction)}</p><p class="alert-evidence"><strong>Evidence:</strong> “${escapeHTML(alert.evidence)}”</p></div>`
+          : `<p class="alert-empty">No post-handoff risk alert.</p>`;
       }
 
       function renderMetrics() {
@@ -294,6 +352,32 @@
           state.live.transcript.push(turn); state.live.route = inferRoute(state.live.transcript); renderLive();
         };
       });
+      const monitorEvents = new EventSource("/api/monitor/events");
+      for (const eventName of ["monitor", "handoff", "transcript", "risk-alert", "monitor-failure"]) {
+        monitorEvents.addEventListener(eventName, (event) => {
+          state.monitor = JSON.parse(event.data);
+          renderMonitor();
+        });
+      }
+      monitorEvents.addEventListener("error", () => {
+        if (!state.monitor?.sessionId) $("monitor-subtitle").textContent = "Sidecar connection unavailable";
+      });
+      $("handoff-demo").addEventListener("click", async () => {
+        const button = $("handoff-demo");
+        button.disabled = true;
+        button.textContent = "Running handoff…";
+        try {
+          const response = await fetch("/api/monitor/demo", { method: "POST" });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "Could not run the demo");
+          state.monitor = result;
+          renderMonitor();
+        } catch (error) {
+          $("monitor-subtitle").textContent = error.message;
+        } finally {
+          setTimeout(() => { button.disabled = false; button.textContent = "Run monitored-handoff demo"; }, 1600);
+        }
+      });
       async function refreshConversations() {
         try {
           const response = await fetch("/api/conversations", { cache: "no-store" });
@@ -317,6 +401,7 @@
         $("live-time").textContent = formatDuration(elapsed);
       }, 500);
       $("refresh").addEventListener("click", refreshConversations);
+      renderMonitor();
       refreshConversations();
       setInterval(refreshConversations, 3000);
     </script>

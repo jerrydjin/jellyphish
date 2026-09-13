@@ -40,10 +40,12 @@ Copy `.env.example` to `.env` and set:
 
 ```env
 ELEVENLABS_API_KEY=
+ELEVENLABS_AGENT_ID=agent_1101m2b4acdnedz9y2yky3w9vwfm
+MONITOR_WEBHOOK_SECRET=
 HUMAN_TRANSFER_NUMBER=
 ```
 
-`ELEVENLABS_API_KEY` must remain server-side and is already excluded from Git. `HUMAN_TRANSFER_NUMBER` is optional and reserved for a later real-phone version.
+`ELEVENLABS_API_KEY` and `MONITOR_WEBHOOK_SECRET` must remain server-side and are already excluded from Git. The secret is required for carrier webhook ingestion but not for the local timed demo. `HUMAN_TRANSFER_NUMBER` remains empty until a real teammate destination is supplied in E.164 format.
 
 Required service for this demo: ElevenLabs Agents through the embedded browser voice widget. `server.mjs` keeps the API key server-side and exposes only the conversation fields required by the owner console. Reception.ai and a phone number are not required for the simulated demo.
 
@@ -65,13 +67,23 @@ The browser interface includes:
 - today’s call, red-call, and distraction-turn totals;
 - real ElevenLabs conversation history with final extracted route and outcome;
 - per-call risk signals, caller claims, reference, summary, and full transcript.
+- a monitored-handoff sidecar with streamed caller/staff transcript and real-time high-risk alerts;
+- a one-click supplier payment-change demo that produces the required staff warning.
 
 ElevenLabs’ enterprise real-time monitor is not required for this demo. The embedded widget supplies immediate session events while the server polls the normal Conversations API for durable logs and post-call analysis.
 
 ## Current limitation
 
-The browser demo does not place or transfer real phone calls. Green calls currently take a callback request; the safe human handoff is represented by that simulated outcome. The transfer template remains available for a later phone-enabled version.
+The browser demo does not place or transfer real phone calls. The live ElevenLabs workspace has no phone number or configured transfer destination, and `.env` has no `HUMAN_TRANSFER_NUMBER`. The monitored-handoff transcript, verified webhook, risk engine, fail-open behavior, and dashboard alert are implemented and tested; a real post-transfer audio sidecar is blocked on an actual Twilio/SIP conference media stream. See [`MONITORED_HANDOFF.md`](./MONITORED_HANDOFF.md) for the exact contract and setup boundary.
+
+## Monitored-handoff verification
+
+```sh
+node --test tests/monitored-handoff.test.mjs
+```
+
+The test rejects an invalid webhook signature, accepts a disclosed human handoff, streams supplier/caller transcript chunks, emits the exact payment-change warning with evidence, confirms the AI-muted state, and verifies that a monitoring failure leaves the human transfer connected.
 
 ## Exact next task for teammate two
 
-Add owner authentication and persistent alert acknowledgement before exposing this console beyond a local hackathon demo. Keep the ElevenLabs API key server-side.
+Connect the existing verified webhook contract to a real Twilio or SIP conference media stream after a number and human destination are supplied. Keep the carrier stream read-only and the AI removed from the conference.
