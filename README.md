@@ -35,9 +35,9 @@ Copy `.env.example` to `.env`, add a restricted ElevenLabs API key, then run:
 cargo +stable run -p jellyphish-server
 ```
 
-Open <http://localhost:4173>, allow microphone access, and start a demo call. The database is created at `data/jellyphish.db`.
+Open the Studio Sol dashboard at <http://localhost:4173>, then open the caller's phone at <http://localhost:4173/phone/> in a second window. Tap **Hair Salon**, then **call**, and allow microphone access. The call appears live on the dashboard. The database is created at `data/jellyphish.db`.
 
-The inline browser control is the fastest demo path. It owns the realtime session directly, so the dashboard receives transcript and disconnect events without a floating widget covering the operator console. A phone number is required only for a real `transfer_to_number` call.
+The phone simulator owns the realtime ElevenLabs session, just like a real caller. It publishes each call snapshot (status, caller number, mute state, transcript) to `POST /api/live/{line}`, and every dashboard for that line mirrors it over `GET /api/live/{line}/events` (SSE). The only line that answers today is `studio-sol`. `dental-clinic` is reserved: add its agent ID to `LINES` in `web/phone/index.html` once that agent exists. Other contacts ring out with no answer. The microphone requires a secure origin, so a real handset needs HTTPS (for example an ngrok URL) rather than a LAN IP. A phone number is required only for a real `transfer_to_number` call.
 
 ## Core API
 

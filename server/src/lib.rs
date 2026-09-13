@@ -2,6 +2,7 @@ mod auth;
 mod config;
 mod db;
 mod elevenlabs;
+mod live;
 mod monitor;
 
 pub use config::Config;
@@ -22,6 +23,7 @@ use axum::{
 use db::now_millis;
 use elevenlabs::ElevenLabsClient;
 use futures_util::{StreamExt, stream};
+use live::{LiveHub, LiveSnapshot, LiveUpdate};
 use monitor::{MonitorHub, MonitorSnapshot};
 use risk_core::{CallerContext, RiskDecision, RiskLevel, TranscriptTurn, evaluate};
 use serde::Deserialize;
@@ -37,6 +39,7 @@ pub struct AppState {
     store: EventStore,
     elevenlabs: ElevenLabsClient,
     monitor: Arc<RwLock<MonitorHub>>,
+    live: Arc<RwLock<LiveHub>>,
 }
 
 pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
@@ -50,6 +53,7 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         store,
         elevenlabs,
         monitor: Arc::new(RwLock::new(MonitorHub::default())),
+        live: Arc::new(RwLock::new(LiveHub::default())),
     })
 }
 
@@ -66,7 +70,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/conversations/{id}", get(conversation))
         .route("/api/monitor/events", get(monitor_events))
         .route("/api/monitor/state", get(monitor_state))
-        .route("/api/monitor/demo", post(monitor_demo))
+        .route("/api/live/{line}", get(live_state).post(live_update))
+        .route("/api/live/{line}/events", get(live_events))
         .route("/api/webhooks/handoff", post(monitor_handoff))
         .route("/api/webhooks/transcript", post(monitor_transcript))
         .route("/api/webhooks/monitor-failure", post(monitor_failure))
@@ -396,45 +401,65 @@ async fn monitor_state(State(state): State<AppState>) -> Json<MonitorSnapshot> {
     Json(state.monitor.read().await.snapshot())
 }
 
-async fn monitor_demo(State(state): State<AppState>) -> (StatusCode, Json<MonitorSnapshot>) {
-    let session_id = format!("demo_{}", now_millis());
-    let session = state
-        .monitor
+fn known_line(line: &str) -> Result<(), ApiError> {
+    if LiveHub::is_line(line) {
+        Ok(())
+    } else {
+        Err(ApiError(StatusCode::NOT_FOUND, "unknown line".to_owned()))
+    }
+}
+
+async fn live_state(
+    State(state): State<AppState>,
+    Path(line): Path<String>,
+) -> Result<Json<LiveSnapshot>, ApiError> {
+    known_line(&line)?;
+    Ok(Json(state.live.write().await.snapshot(&line)))
+}
+
+async fn live_update(
+    State(state): State<AppState>,
+    Path(line): Path<String>,
+    Json(update): Json<LiveUpdate>,
+) -> Result<StatusCode, ApiError> {
+    known_line(&line)?;
+    let applied = state
+        .live
         .write()
         .await
-        .begin(session_id.clone(), true, "local-demo");
-    let monitor = state.monitor.clone();
-    tokio::spawn(async move {
-        let turns = [
-            (
-                120,
-                "caller",
-                "Hi, this is Morgan from Harbour Coffee Roasters about tomorrow's delivery, reference HCR-204.",
-            ),
-            (400, "staff", "Hi Morgan, what did you need to confirm?"),
-            (
-                400,
-                "caller",
-                "Our payment details have changed, so update the bank account today.",
-            ),
-            (
-                400,
-                "caller",
-                "It must happen now or the delivery may be cancelled.",
-            ),
-        ];
-        for (sequence, (delay, role, text)) in turns.into_iter().enumerate() {
-            tokio::time::sleep(Duration::from_millis(delay)).await;
-            let _ = monitor.write().await.ingest(
-                session_id.clone(),
-                Some(sequence as i64),
-                role.to_owned(),
-                text.to_owned(),
-                "local-demo",
-            );
+        .apply(&line, update)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(if applied {
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::OK
+    })
+}
+
+async fn live_events(
+    State(state): State<AppState>,
+    Path(line): Path<String>,
+) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    known_line(&line)?;
+    let (snapshot, receiver) = {
+        let mut hub = state.live.write().await;
+        (
+            serde_json::to_string(&hub.snapshot(&line)).unwrap_or_default(),
+            hub.subscribe(),
+        )
+    };
+    let initial = stream::once(async move { Ok(Event::default().event("live").data(snapshot)) });
+    let updates = BroadcastStream::new(receiver).filter_map(move |message| {
+        let line = line.clone();
+        async move {
+            message
+                .ok()
+                .filter(|(event_line, _)| *event_line == line)
+                .map(|(_, data)| Ok(Event::default().event("live").data(data)))
         }
     });
-    (StatusCode::ACCEPTED, Json(MonitorSnapshot::Active(session)))
+    Ok(Sse::new(initial.chain(updates))
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(20))))
 }
 
 async fn monitor_events(
@@ -676,5 +701,98 @@ mod tests {
             body["alerts"][0]["signals"][0]["id"],
             "payment_or_account_change"
         );
+    }
+
+    fn live_update(call_id: &str, seq: u64, status: &str) -> Request<Body> {
+        let body = json!({
+            "callId": call_id,
+            "seq": seq,
+            "status": status,
+            "callerNumber": "+61 400 000 000",
+            "transcript": [
+                { "role": "user", "message": "Can I book a haircut tomorrow?" },
+                { "role": "system", "message": "not a caller or agent turn" }
+            ]
+        });
+        Request::post("/api/live/studio-sol")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    async fn live_snapshot(app: &Router) -> Value {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get("/api/live/studio-sol")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn live_call_relays_to_dashboard_and_ignores_stale_updates() {
+        let app = test_app().await;
+        let status = |request: Request<Body>| {
+            let app = app.clone();
+            async move { app.oneshot(request).await.unwrap().status() }
+        };
+
+        assert_eq!(
+            status(live_update("call-1", 1, "connected")).await,
+            StatusCode::ACCEPTED
+        );
+        let body = live_snapshot(&app).await;
+        assert_eq!(body["call"]["status"], "connected");
+        assert_eq!(body["call"]["callerNumber"], "+61 400 000 000");
+        assert!(body["call"]["startedAt"].is_i64());
+        assert_eq!(body["call"]["transcript"].as_array().unwrap().len(), 1);
+
+        // Out-of-order snapshots are dropped.
+        assert_eq!(
+            status(live_update("call-1", 1, "connected")).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status(live_update("call-1", 2, "ended")).await,
+            StatusCode::ACCEPTED
+        );
+        // A heartbeat that raced the hang-up must not revive the call.
+        assert_eq!(
+            status(live_update("call-1", 3, "connected")).await,
+            StatusCode::OK
+        );
+        let body = live_snapshot(&app).await;
+        assert_eq!(body["call"]["status"], "ended");
+        assert!(body["call"]["endedAt"].is_i64());
+
+        // The next call on the line replaces the finished one.
+        assert_eq!(
+            status(live_update("call-2", 1, "connecting")).await,
+            StatusCode::ACCEPTED
+        );
+        let body = live_snapshot(&app).await;
+        assert_eq!(body["call"]["callId"], "call-2");
+        assert!(body["call"]["startedAt"].is_null());
+    }
+
+    #[tokio::test]
+    async fn live_relay_rejects_unknown_lines_and_statuses() {
+        let app = test_app().await;
+        let response = app
+            .clone()
+            .oneshot(Request::get("/api/live/nope").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let response = app
+            .oneshot(live_update("call-1", 1, "transferred"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }
