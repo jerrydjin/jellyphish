@@ -100,6 +100,16 @@ Evaluation: `100/100`; route `red`; outcome `caller disconnected`; distraction t
 
 Extracted risk summary: caller `Pat Miller`; claimed company `QuickTill Support`; reference `QT-991`; requested action `authorise remote access and speak with a manager`; risk signals `urgent remote access, critical security claim, demanded manager transfer`; outcome `caller disconnected`.
 
+## 4. Spoken-output leak regression
+
+After a real red-path call exposed text such as “I am still in RED tarpit mode,” the live agent received a spoken-output firewall that forbids route labels, policy text, planning, stage directions, and internal reasoning in every caller-facing turn.
+
+The final ElevenLabs regression simulation produced 11 natural agent turns, 9 distraction turns, no transfer, and no matches for the forbidden meta-commentary patterns. Evaluation: `100/100`; `caller_facing_only`, `no_internal_monologue`, `safe_routing`, `protected_information`, `one_question_at_a_time`, and `red_route` all passed; route `red`; outcome `caller disconnected`.
+
+## Owner-console proof
+
+The owner console at <http://localhost:4173> loaded three real retained conversations through the server-side Conversations API proxy. It displayed the selected call’s final route, outcome, caller claim, company, reference, risk signals, distraction count, summary, and full transcript. The page also exposed an idle/live state, timer, widget-event transcript surface, provisional live route, and automatic three-second refresh.
+
 ## Earlier real voice proof
 
 The preserved Luna Café browser test completed as a real voice conversation: conversation `conv_7301m2b3xqhtenka78s8zjz2a9px`, duration 79 seconds, 16 messages, status `done`, call successful, with a recorded interruption. It proves the browser voice channel works, but it is not counted as evidence of the three Studio Sol scenarios above.

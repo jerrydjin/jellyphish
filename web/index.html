@@ -3,28 +3,322 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Studio Sol Hair — Voice Test</title>
+    <meta name="description" content="Live call screening console for Studio Sol Hair." />
+    <title>Studio Sol — Call Console</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231b1722'/%3E%3Cpath d='M18 40c8 9 22 8 28-3M20 25c4-7 18-9 24 0' fill='none' stroke='%23ff8066' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E" />
     <style>
-      :root { color-scheme: light; font-family: ui-rounded, system-ui, sans-serif; }
-      body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #f5efe5; color: #29251f; }
-      main { width: min(560px, calc(100% - 48px)); padding: 40px; border: 1px solid #cabca6; border-radius: 20px; background: #fffaf2; box-shadow: 0 18px 60px #6f5b3e1a; }
-      h1 { margin: 0 0 8px; font-size: 2rem; }
-      p { line-height: 1.55; }
-      ol { padding-left: 1.25rem; line-height: 1.65; }
-      elevenlabs-convai { display: block; margin-top: 28px; }
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --ink: #f7f4fb;
+        --muted: #9b94a6;
+        --panel: #201b28;
+        --panel-2: #17131d;
+        --border: #383141;
+        --accent: #ff8066;
+        --green: #55d58d;
+        --amber: #f0b94f;
+        --red: #ff665f;
+        --r: 18px;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; background: #110e16; color: var(--ink); font-size: 16px; }
+      button { font: inherit; }
+      .app { min-height: 100vh; display: grid; grid-template-columns: 320px minmax(0, 1fr); }
+      aside { position: sticky; top: 0; height: 100vh; padding: 28px; background: var(--panel-2); border-right: 1px solid var(--border); overflow: auto; }
+      .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 42px; }
+      .brand-mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px; color: #18121d; background: var(--accent); font-weight: 900; }
+      .brand strong { display: block; letter-spacing: -.02em; }
+      .brand small { color: var(--muted); font-size: .78rem; }
+      .eyebrow { margin: 0 0 10px; color: var(--accent); font-size: .75rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+      aside h2 { margin: 0; font-size: 1.55rem; letter-spacing: -.035em; }
+      aside p { color: var(--muted); line-height: 1.55; }
+      .scenario-list { display: grid; gap: 9px; margin: 24px 0; }
+      .scenario { padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; color: #ccc5d4; background: #1d1824; font-size: .86rem; line-height: 1.4; }
+      .scenario span { display: inline-grid; width: 21px; height: 21px; margin-right: 7px; place-items: center; border-radius: 7px; color: #17131d; background: #c9c1d4; font-size: .7rem; font-weight: 800; }
+      elevenlabs-convai { display: block; margin-top: 18px; }
+      .privacy { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); color: #777080; font-size: .75rem; line-height: 1.5; }
+
+      main { min-width: 0; padding: 30px clamp(24px, 4vw, 58px) 50px; }
+      .topbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+      h1 { margin: 0; font-size: clamp(1.8rem, 3vw, 2.65rem); letter-spacing: -.055em; }
+      .top-actions { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: .82rem; }
+      .live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 5px #55d58d1e; }
+      .refresh { padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; color: var(--ink); background: transparent; cursor: pointer; }
+      .refresh:hover, .refresh:focus-visible { border-color: #645b70; outline: none; }
+      .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+      .metric { padding: 18px; border: 1px solid var(--border); border-radius: 15px; background: var(--panel); }
+      .metric-label { color: var(--muted); font-size: .78rem; }
+      .metric-value { display: block; margin-top: 7px; font-size: 1.8rem; font-weight: 750; letter-spacing: -.045em; }
+
+      .live-card { display: grid; grid-template-columns: minmax(230px, .75fr) minmax(0, 1.25fr); min-height: 220px; margin-bottom: 18px; border: 1px solid #59403f; border-radius: var(--r); overflow: hidden; background: linear-gradient(135deg, #2a1e25, #201b28 66%); }
+      .live-meta { padding: 24px; border-right: 1px solid #59403f; }
+      .live-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .live-heading h2 { margin: 0; font-size: 1.15rem; }
+      .status-pill, .route-pill { display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border-radius: 999px; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+      .status-pill { color: #b8f5d0; background: #163826; }
+      .status-pill.idle { color: #aaa2b3; background: #302a38; }
+      .live-time { margin: 24px 0 3px; font-variant-numeric: tabular-nums; font-size: 2.5rem; font-weight: 760; letter-spacing: -.06em; }
+      .live-caption { color: var(--muted); font-size: .82rem; }
+      .wave { height: 32px; display: flex; align-items: center; gap: 4px; margin-top: 26px; }
+      .wave i { width: 4px; height: 7px; border-radius: 9px; background: var(--accent); opacity: .45; }
+      .live-card.active .wave i { animation: wave .85s ease-in-out infinite alternate; }
+      .wave i:nth-child(2n) { animation-delay: -.3s; }
+      .wave i:nth-child(3n) { animation-delay: -.55s; }
+      @keyframes wave { to { height: 28px; opacity: 1; } }
+      .live-transcript { min-width: 0; padding: 24px; }
+      .live-transcript-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+      .live-transcript-head strong { font-size: .86rem; }
+      .route-pill { color: #b9b1c2; background: #332d3a; }
+      .route-pill.green { color: #aef0c9; background: #183a29; }
+      .route-pill.amber { color: #ffd989; background: #44341a; }
+      .route-pill.red { color: #ffb0aa; background: #4a2325; }
+      .live-lines { height: 132px; overflow: auto; display: grid; align-content: start; gap: 11px; }
+      .empty { margin: auto 0; color: #766f7e; font-size: .9rem; line-height: 1.55; }
+      .line { display: grid; grid-template-columns: 52px 1fr; gap: 10px; color: #ddd7e4; font-size: .88rem; line-height: 1.45; }
+      .line b { color: var(--muted); font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; }
+      .line.agent b { color: var(--accent); }
+
+      .workspace { display: grid; grid-template-columns: minmax(360px, .9fr) minmax(380px, 1.1fr); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; background: var(--panel); }
+      .calls { min-width: 0; border-right: 1px solid var(--border); }
+      .section-head { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--border); }
+      .section-head h2 { margin: 0; font-size: 1rem; }
+      .section-head span { color: var(--muted); font-size: .76rem; }
+      .call-list { max-height: 630px; overflow: auto; }
+      .call-row { width: 100%; display: grid; grid-template-columns: 46px 1fr auto; gap: 12px; align-items: center; padding: 16px 18px; border: 0; border-bottom: 1px solid #312b38; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+      .call-row:hover, .call-row:focus-visible, .call-row.selected { background: #2a2431; outline: none; }
+      .route-block { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; background: #312b39; color: #aaa2b2; font-weight: 850; }
+      .route-block.green { color: var(--green); background: #193629; }
+      .route-block.amber { color: var(--amber); background: #3f321c; }
+      .route-block.red { color: var(--red); background: #442326; }
+      .call-copy { min-width: 0; }
+      .call-title { display: block; overflow: hidden; color: #ece7f1; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+      .call-sub { display: block; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
+      .call-time { color: #8e8797; font-size: .75rem; text-align: right; white-space: nowrap; }
+      .call-time b { display: block; margin-bottom: 4px; color: #c7c0ce; font-weight: 600; }
+      .detail { min-width: 0; }
+      .detail-scroll { max-height: 630px; overflow: auto; padding: 22px; }
+      .detail-title { margin: 0 0 6px; font-size: 1.25rem; letter-spacing: -.03em; }
+      .detail-summary { margin: 0 0 20px; color: var(--muted); line-height: 1.55; }
+      .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 22px; }
+      .fact { min-width: 0; padding: 12px; border: 1px solid #37303f; border-radius: 12px; background: #1a161f; }
+      .fact small { display: block; margin-bottom: 5px; color: #837b8c; font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; }
+      .fact strong { display: block; overflow: hidden; font-size: .86rem; text-overflow: ellipsis; white-space: nowrap; }
+      .risk { margin-bottom: 22px; padding: 14px; border-left: 3px solid var(--red); border-radius: 4px 12px 12px 4px; background: #311e24; color: #eacbce; font-size: .85rem; line-height: 1.5; }
+      .notice { margin-bottom: 16px; padding: 12px 14px; border: 1px solid #695128; border-radius: 11px; background: #332919; color: #f0d69e; font-size: .8rem; line-height: 1.5; }
+      .transcript { display: grid; gap: 12px; }
+      .bubble { max-width: 88%; padding: 11px 13px; border-radius: 14px 14px 14px 4px; background: #302938; color: #ded8e5; font-size: .86rem; line-height: 1.5; }
+      .bubble.agent { justify-self: end; border-radius: 14px 14px 4px 14px; background: #3a272d; }
+      .bubble small { display: block; margin-bottom: 4px; color: #8e8697; font-size: .68rem; text-transform: uppercase; }
+      .bubble.agent small { color: #f09b87; }
+      .error { padding: 30px; color: #ffaaa5; line-height: 1.5; }
+
+      @media (max-width: 1050px) {
+        .app { grid-template-columns: 270px minmax(0, 1fr); }
+        aside { padding: 22px; }
+        .metrics { grid-template-columns: repeat(2, 1fr); }
+        .workspace { grid-template-columns: 1fr; }
+        .calls { border-right: 0; border-bottom: 1px solid var(--border); }
+        .call-list, .detail-scroll { max-height: 460px; }
+      }
+      @media (max-width: 760px) {
+        .app { display: block; }
+        aside { position: static; width: auto; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+        .brand { margin-bottom: 28px; }
+        main { padding: 24px 16px 40px; }
+        .topbar { align-items: flex-start; }
+        .top-actions > span:not(.live-dot) { display: none; }
+        .live-card { grid-template-columns: 1fr; }
+        .live-meta { border-right: 0; border-bottom: 1px solid #59403f; }
+        .workspace { grid-template-columns: 1fr; }
+      }
     </style>
   </head>
   <body>
-    <main>
-      <h1>Studio Sol Hair voice test</h1>
-      <p>Start the call below and speak naturally for at least one minute.</p>
-      <ol>
-        <li>Ask to book a haircut tomorrow afternoon.</li>
-        <li>Say you are calling about a delivery tomorrow.</li>
-        <li>Claim to be the POS provider, demand remote support, and see how long Sol keeps you talking safely.</li>
-      </ol>
-      <elevenlabs-convai agent-id="agent_1101m2b4acdnedz9y2yky3w9vwfm"></elevenlabs-convai>
-    </main>
+    <div class="app">
+      <aside>
+        <div class="brand"><div class="brand-mark">S</div><div><strong>Studio Sol</strong><small>Call protection console</small></div></div>
+        <p class="eyebrow">Demo line</p>
+        <h2>Test the front desk</h2>
+        <p>Start a browser call. The owner console updates during the conversation and saves ElevenLabs’ final result.</p>
+        <div class="scenario-list">
+          <div class="scenario"><span>1</span>Ask for a haircut tomorrow.</div>
+          <div class="scenario"><span>2</span>Call about a delivery.</div>
+          <div class="scenario"><span>3</span>Demand remote POS access.</div>
+        </div>
+        <elevenlabs-convai agent-id="agent_1101m2b4acdnedz9y2yky3w9vwfm" variant="expanded" action-text="Talk to Sol" start-call-text="Start demo call" end-call-text="End call" listening-text="Caller speaking…" speaking-text="Sol speaking…" avatar-orb-color-1="#ff8066" avatar-orb-color-2="#6c3454"></elevenlabs-convai>
+        <div class="privacy">Demo recordings and transcripts are retained by ElevenLabs for seven days. The API key stays on this local server.</div>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div><p class="eyebrow">Owner overview</p><h1>Calls, as they happen.</h1></div>
+          <div class="top-actions"><span class="live-dot"></span><span id="sync-label">Connecting to ElevenLabs</span><button class="refresh" id="refresh" type="button">Refresh</button></div>
+        </header>
+        <section class="metrics" aria-label="Call metrics">
+          <div class="metric"><span class="metric-label">Active now</span><strong class="metric-value" id="metric-active">—</strong></div>
+          <div class="metric"><span class="metric-label">Calls today</span><strong class="metric-value" id="metric-calls">—</strong></div>
+          <div class="metric"><span class="metric-label">Red calls held</span><strong class="metric-value" id="metric-red">—</strong></div>
+          <div class="metric"><span class="metric-label">Distraction turns</span><strong class="metric-value" id="metric-turns">—</strong></div>
+        </section>
+        <section class="live-card" id="live-card" aria-labelledby="live-title">
+          <div class="live-meta">
+            <div class="live-heading"><h2 id="live-title">Live call</h2><span class="status-pill idle" id="live-status">Idle</span></div>
+            <div class="live-time" id="live-time">00:00</div>
+            <div class="live-caption" id="live-caption">Waiting for the next browser call</div>
+            <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+          <div class="live-transcript">
+            <div class="live-transcript-head"><strong>Live transcript</strong><span class="route-pill" id="live-route">Not classified</span></div>
+            <div class="live-lines" id="live-lines"><p class="empty">Speech will appear here while the call is running.</p></div>
+          </div>
+        </section>
+        <section class="workspace" aria-label="Call history">
+          <div class="calls">
+            <div class="section-head"><h2>Recent calls</h2><span id="history-count">Loading…</span></div>
+            <div class="call-list" id="call-list"></div>
+          </div>
+          <div class="detail">
+            <div class="section-head"><h2>Call detail</h2><span id="detail-meta">Select a call</span></div>
+            <div class="detail-scroll" id="detail"><p class="empty">Choose a call to see its outcome, risk summary and transcript.</p></div>
+          </div>
+        </section>
+      </main>
+    </div>
     <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+    <script>
+      const state = { conversations: [], selectedId: null, live: { active: false, startedAt: 0, transcript: [], route: null }, loadingDetail: false };
+      const $ = (id) => document.getElementById(id);
+      const ACTIVE = new Set(["initiated", "in-progress", "processing"]);
+
+      function escapeHTML(value = "") {
+        return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
+      }
+      function routeOf(call) { return String(call?.data?.route || "").toLowerCase(); }
+      function formatDuration(seconds = 0) { const m = Math.floor(seconds / 60); const s = Math.floor(seconds % 60); return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`; }
+      function formatClock(unix) { return unix ? new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" }).format(new Date(unix * 1000)) : "Now"; }
+      function isToday(unix) { if (!unix) return false; const d = new Date(unix * 1000), n = new Date(); return d.toDateString() === n.toDateString(); }
+      function displayTitle(call) { return call.title || call.data?.requested_action || (routeOf(call) === "red" ? "Suspicious call" : "General enquiry"); }
+      function inferRoute(transcript) {
+        const text = transcript.map((turn) => turn.message).join(" ").toLowerCase();
+        if (/remote\s*(access|support)|password|mfa|verification code|refund|payment change|account access|compromised|install/.test(text)) return "red";
+        if (/delivery|supplier|purchase order|staff (schedule|available)|duty manager/.test(text)) return "amber";
+        return transcript.length ? "green" : null;
+      }
+
+      function renderMetrics() {
+        const today = state.conversations.filter((call) => isToday(call.startedAt));
+        $("metric-active").textContent = state.live.active || state.conversations.some((call) => ACTIVE.has(call.status)) ? "1" : "0";
+        $("metric-calls").textContent = today.length;
+        $("metric-red").textContent = today.filter((call) => routeOf(call) === "red").length;
+        $("metric-turns").textContent = today.reduce((sum, call) => sum + Number(call.data?.distraction_turns || 0), 0);
+      }
+      function renderCalls() {
+        $("history-count").textContent = `${state.conversations.length} retained`;
+        $("call-list").innerHTML = state.conversations.length ? state.conversations.map((call) => {
+          const route = routeOf(call);
+          const letter = route ? route[0].toUpperCase() : ACTIVE.has(call.status) ? "•" : "?";
+          const subtitle = call.data?.outcome || call.summary || `${call.messageCount} messages`;
+          return `<button class="call-row ${call.id === state.selectedId ? "selected" : ""}" data-id="${escapeHTML(call.id)}" type="button"><span class="route-block ${escapeHTML(route)}">${escapeHTML(letter)}</span><span class="call-copy"><span class="call-title">${escapeHTML(displayTitle(call))}</span><span class="call-sub">${escapeHTML(subtitle)}</span></span><span class="call-time"><b>${formatClock(call.startedAt)}</b>${formatDuration(call.duration)}</span></button>`;
+        }).join("") : `<p class="empty" style="padding:24px">No calls yet. Start one from the demo line.</p>`;
+        document.querySelectorAll(".call-row").forEach((row) => row.addEventListener("click", () => selectConversation(row.dataset.id)));
+      }
+      function renderLive() {
+        const remote = state.conversations.find((call) => ACTIVE.has(call.status));
+        const active = state.live.active || Boolean(remote);
+        const transcript = state.live.transcript;
+        const route = state.live.route || inferRoute(transcript) || routeOf(remote);
+        $("live-card").classList.toggle("active", active);
+        $("live-status").textContent = active ? "Connected" : "Idle";
+        $("live-status").classList.toggle("idle", !active);
+        $("live-caption").textContent = active ? "Sol is screening this caller now" : "Waiting for the next browser call";
+        $("live-route").textContent = route ? `${route} · provisional` : "Not classified";
+        $("live-route").className = `route-pill ${route || ""}`;
+        $("live-lines").innerHTML = transcript.length ? transcript.slice(-8).map((turn) => `<div class="line ${escapeHTML(turn.role)}"><b>${turn.role === "agent" ? "Sol" : "Caller"}</b><span>${escapeHTML(turn.message)}</span></div>`).join("") : `<p class="empty">${active ? "Connected. Waiting for speech…" : "Speech will appear here while the call is running."}</p>`;
+        $("live-lines").scrollTop = $("live-lines").scrollHeight;
+      }
+      async function selectConversation(id, quiet = false) {
+        if (state.loadingDetail && id === state.selectedId) return;
+        state.selectedId = id;
+        state.loadingDetail = true;
+        renderCalls();
+        if (!quiet) $("detail").innerHTML = `<p class="empty">Loading transcript…</p>`;
+        try {
+          const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`, { cache: "no-store" });
+          const call = await response.json();
+          if (!response.ok) throw new Error(call.error || "Could not load this call");
+          renderDetail(call);
+          if (ACTIVE.has(call.status) && !state.live.transcript.length) {
+            state.live.active = true;
+            state.live.startedAt ||= Date.now();
+            state.live.transcript = call.transcript || [];
+            state.live.route = call.data?.route || inferRoute(state.live.transcript);
+            renderLive();
+          }
+        } catch (error) { $("detail").innerHTML = `<div class="error">${escapeHTML(error.message)}</div>`; }
+        finally { state.loadingDetail = false; }
+      }
+      function renderDetail(call) {
+        const route = String(call.data?.route || "unclassified").toLowerCase();
+        const facts = [["Route", route], ["Outcome", call.data?.outcome || call.status], ["Caller", call.data?.caller_name || "Not provided"], ["Company", call.data?.claimed_company || "Not provided"], ["Reference", call.data?.reference || "None"], ["Distraction", `${call.data?.distraction_turns || 0} turns`]];
+        const legacyLeak = (call.transcript || []).some((turn) => turn.role === "agent" && /(red tarpit|routing model|the user provided|i am still in red)/i.test(turn.message));
+        $("detail-meta").textContent = `${formatClock(call.startedAt)} · ${formatDuration(call.duration)}`;
+        $("detail").innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px"><h3 class="detail-title">${escapeHTML(call.title || "Call transcript")}</h3><span class="route-pill ${escapeHTML(route)}">${escapeHTML(route)}</span></div>${legacyLeak ? `<div class="notice"><strong>Historical call:</strong> this transcript predates the spoken-output firewall. The current agent passed the no-internal-monologue regression.</div>` : ""}<p class="detail-summary">${escapeHTML(call.summary || "Analysis is still processing for this call.")}</p><div class="facts">${facts.map(([label, value]) => `<div class="fact"><small>${escapeHTML(label)}</small><strong title="${escapeHTML(value)}">${escapeHTML(value)}</strong></div>`).join("")}</div>${call.data?.risk_signals && call.data.risk_signals !== "none" ? `<div class="risk"><strong>Risk signals:</strong> ${escapeHTML(call.data.risk_signals)}</div>` : ""}<div class="transcript">${(call.transcript || []).map((turn) => `<div class="bubble ${escapeHTML(turn.role)}"><small>${turn.role === "agent" ? "Sol" : "Caller"} · ${formatDuration(turn.time)}${turn.interrupted ? " · interrupted" : ""}</small>${escapeHTML(turn.message)}</div>`).join("") || `<p class="empty">Transcript is not available yet.</p>`}</div>`;
+      }
+      function normalizeMessage(payload) {
+        const message = payload?.message || payload?.text || payload?.user_transcript || payload?.agent_response;
+        const source = String(payload?.source || payload?.role || payload?.type || "").toLowerCase();
+        const role = source.includes("user") ? "user" : source.includes("agent") || source.includes("ai") ? "agent" : null;
+        return typeof message === "string" && role ? { role, message } : null;
+      }
+      function startLive() {
+        if (!state.live.active) state.live = { active: true, startedAt: Date.now(), transcript: [], route: null };
+        renderMetrics(); renderLive(); setTimeout(refreshConversations, 1200);
+      }
+      function stopLive() {
+        state.live.active = false; renderMetrics(); renderLive(); setTimeout(refreshConversations, 1800); setTimeout(refreshConversations, 5500);
+      }
+
+      const widget = document.querySelector("elevenlabs-convai");
+      widget.addEventListener("elevenlabs-convai:call", (event) => {
+        const config = event.detail?.config;
+        if (!config) return;
+        config.onConnect = startLive;
+        config.onDisconnect = stopLive;
+        config.onStatusChange = ({ status } = {}) => { if (status === "connected") startLive(); if (status === "disconnected" && state.live.active) stopLive(); };
+        config.onMessage = (payload) => {
+          const turn = normalizeMessage(payload);
+          if (!turn) return;
+          const previous = state.live.transcript.at(-1);
+          if (previous?.role === turn.role && previous.message === turn.message) return;
+          state.live.transcript.push(turn); state.live.route = inferRoute(state.live.transcript); renderLive();
+        };
+      });
+      async function refreshConversations() {
+        try {
+          const response = await fetch("/api/conversations", { cache: "no-store" });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "Could not load conversations");
+          const previousFirst = state.conversations[0]?.id;
+          state.conversations = result.conversations || [];
+          $("sync-label").textContent = `Live · updated ${new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(new Date(result.refreshedAt))}`;
+          renderMetrics(); renderCalls(); renderLive();
+          const active = state.conversations.find((call) => ACTIVE.has(call.status));
+          if (active) { state.selectedId = active.id; await selectConversation(active.id, true); }
+          else if (!state.selectedId && state.conversations[0]) await selectConversation(state.conversations[0].id);
+          else if (state.live.active === false && previousFirst && state.conversations[0]?.id !== previousFirst) { state.selectedId = state.conversations[0].id; await selectConversation(state.selectedId); }
+        } catch (error) {
+          $("sync-label").textContent = "ElevenLabs unavailable";
+          if (!state.conversations.length) $("call-list").innerHTML = `<div class="error">${escapeHTML(error.message)}. Start this page with node server.mjs.</div>`;
+        }
+      }
+      setInterval(() => {
+        const elapsed = state.live.active && state.live.startedAt ? Math.floor((Date.now() - state.live.startedAt) / 1000) : 0;
+        $("live-time").textContent = formatDuration(elapsed);
+      }, 500);
+      $("refresh").addEventListener("click", refreshConversations);
+      refreshConversations();
+      setInterval(refreshConversations, 3000);
+    </script>
   </body>
 </html>
