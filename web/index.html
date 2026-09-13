@@ -285,6 +285,7 @@
       let incomingRoom = null;
       let staffCall = null;
       let staffCallStartedAt = 0;
+      let ignoreSettledSlots = false;
       // Call timestamps come from the server; correct for this browser's clock drift.
       let clockOffset = 0;
       const serverNow = () => Date.now() + clockOffset;
@@ -430,10 +431,12 @@
         if (Number.isFinite(snapshot?.serverNow)) clockOffset = snapshot.serverNow - Date.now();
         const call = snapshot?.call;
         if (!call) return;
+        const finished = call.status === "ended" || call.status === "lost";
+        if (ignoreSettledSlots && finished) return;
+        if (!finished) ignoreSettledSlots = false;
         const previous = state.live;
         const sameCall = call.callId === previous.callId;
         const wasLive = sameCall && (previous.active || previous.ringing);
-        const finished = call.status === "ended" || call.status === "lost";
         if (!sameCall) {
           if (call.status === "connecting" || call.status === "connected") userPinnedSelection = false;
         }
@@ -506,6 +509,26 @@
         $("detail").innerHTML = `<div style="margin-bottom:8px"><h3 class="detail-title">${escapeHTML(call.title || "Call transcript")}</h3></div>${legacyLeak ? `<div class="notice">This older transcript predates the spoken-output firewall. The current agent passed the no-internal-monologue regression.</div>` : ""}<p class="detail-summary">${escapeHTML(call.summary || "Analysis is still processing for this call.")}</p>${factsMarkup}${call.data?.risk_signals && call.data.risk_signals !== "none" ? `<div class="risk"><span>Risk signals: </span>${escapeHTML(call.data.risk_signals)}</div>` : ""}<div class="transcript">${(call.transcript || []).map((turn) => `<div class="bubble ${escapeHTML(turn.role)}"><small>${turn.role === "agent" ? biz.assistant : "Caller"} · ${formatDuration(turn.time)}${turn.interrupted ? " · interrupted" : ""}</small>${escapeHTML(turn.message)}</div>`).join("") || `<p class="empty">Transcript is not available yet.</p>`}</div>`;
       }
 
+      function settledMonitor(monitor) {
+        const phase = operatorStaffPhase(monitor, { answered: Boolean(staffCall) });
+        return phase === "idle" || phase === "ended";
+      }
+      function applyMonitorSnapshot(next) {
+        if (ignoreSettledSlots && settledMonitor(next)) return false;
+        if (!settledMonitor(next)) ignoreSettledSlots = false;
+        state.monitor = next;
+        return true;
+      }
+      function clearLiveAndMonitorSlots() {
+        ignoreSettledSlots = true;
+        state.live = idleLive();
+        if (!staffCall) {
+          incomingRoom = null;
+          state.monitor = { status: "idle" };
+        }
+        renderLive();
+      }
+
       const liveEvents = new EventSource(`/api/live/${LINE}/events`);
       liveEvents.addEventListener("live", (event) => {
         try { applyLive(JSON.parse(event.data)); } catch {}
@@ -513,7 +536,8 @@
       const monitorEvents = new EventSource(`/api/monitor/${encodeURIComponent(LINE)}/events`);
       for (const eventName of ["monitor", "handoff", "transcript", "risk-alert", "monitor-failure"]) {
         monitorEvents.addEventListener(eventName, (event) => {
-          state.monitor = JSON.parse(event.data);
+          const next = JSON.parse(event.data);
+          if (!applyMonitorSnapshot(next)) return;
           if (state.monitor.handoffStatus === "ringing" && state.monitor.sessionId && !incomingRoom?.offer) {
             fetchHandoffRoom(LINE, state.monitor.sessionId).then((room) => { incomingRoom = room; renderMonitor(); }).catch(() => {});
           }
@@ -521,6 +545,7 @@
         });
       }
       monitorEvents.addEventListener("incoming", (event) => {
+        ignoreSettledSlots = false;
         incomingRoom = JSON.parse(event.data);
         renderMonitor();
       });
@@ -533,10 +558,15 @@
       });
       monitorEvents.addEventListener("hangup", async (event) => {
         const payload = JSON.parse(event.data);
-        incomingRoom = payload.room || incomingRoom;
         await staffCall?.handleSignal({ ...payload, kind: "hangup", sessionId: payload.sessionId });
         staffCall = null;
         staffCallStartedAt = 0;
+        if (ignoreSettledSlots) {
+          incomingRoom = null;
+          state.monitor = { status: "idle" };
+        } else {
+          incomingRoom = payload.room || incomingRoom;
+        }
         renderMonitor();
       });
       monitorEvents.addEventListener("error", () => {
@@ -637,7 +667,10 @@
         await closeHandoffLine();
         renderMonitor();
       });
-      $("refresh").addEventListener("click", () => refreshConversations({ forceDetail: true }));
+      $("refresh").addEventListener("click", () => {
+        clearLiveAndMonitorSlots();
+        refreshConversations({ forceDetail: true });
+      });
       fetch("/api/health").then((response) => response.json()).then((health) => {
         const id = health?.lines?.[LINE]?.agentId || (LINE === "studio-sol" ? health?.agentId : "");
         if (id) biz.agentId = id;
