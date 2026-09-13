@@ -360,7 +360,7 @@
     <audio id="handoff-remote" autoplay playsinline></audio>
 
     <script type="module">
-      import { normalizeConversationMessage } from "/call-lifecycle.mjs";
+      import { applyLiveTurn, liveTranscriptPayload, normalizeConversationMessage, normalizeDebugEvent, normalizeIncomingSocketEvent, SOL_OPENING_LINE } from "/call-lifecycle.mjs";
       import { callerPreviewFromTurns, HandoffCall } from "/handoff-call.mjs";
 
       let ConversationClient = null;
@@ -732,6 +732,26 @@
             agentId: LINES[current.line].agentId,
             connectionType: "webrtc",
             clientTools: {
+              assess_call_browser: async (parameters = {}) => {
+                const callerTurns = current.transcript.filter((turn) => turn.role === "user");
+                const text = callerTurns.map((turn) => turn.message).join(" ");
+                const response = await fetch("/tool/assess", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({
+                    call_id: current.conversationId || current.id,
+                    caller_name: parameters.caller_name || null,
+                    claimed_company: parameters.claimed_company || null,
+                    business_caller: Boolean(parameters.business_caller),
+                    requested_action: parameters.requested_action || text,
+                    transcript: Array.isArray(parameters.transcript) && parameters.transcript.length ? parameters.transcript : callerTurns,
+                    proposed_action: parameters.proposed_action || null,
+                  }),
+                });
+                const decision = await response.json();
+                if (!response.ok) throw new Error(decision.error || "Policy service unavailable");
+                return decision;
+              },
               transfer_to_human: async (parameters = {}) => startStaffHandoff(current, parameters),
             },
             onConnect: ({ conversationId }) => {
@@ -759,17 +779,10 @@
               current.mode = mode;
               publish(current);
             },
-            onMessage: (payload) => {
-              const turn = normalizeConversationMessage(payload);
-              if (!turn || current.over) return;
-              const previous = current.transcript.at(-1);
-              const duplicate = turn.eventId != null
-                ? current.transcript.some((item) => item.eventId === turn.eventId)
-                : previous?.role === turn.role && previous.message === turn.message;
-              if (duplicate) return;
-              current.transcript.push(turn);
-              publish(current);
-            },
+            onIncomingEvent: (event) => ingestLiveTurn(current, normalizeIncomingSocketEvent(event)),
+            onDebug: (info) => ingestLiveTurn(current, normalizeDebugEvent(info)),
+            onAgentChatResponsePart: (part) => ingestLiveTurn(current, normalizeIncomingSocketEvent({ type: "agent_chat_response_part", text_response_part: part })),
+            onMessage: (payload) => ingestLiveTurn(current, normalizeConversationMessage(payload)),
             onAgentResponseCorrection: ({ original_agent_response: original, corrected_agent_response: corrected }) => {
               const turn = [...current.transcript].reverse().find((item) => item.role === "agent" && item.message === original);
               if (!turn || !corrected) return;
@@ -797,10 +810,22 @@
         }
       }
 
+      function ingestLiveTurn(current, turn) {
+        if (!turn || current.over) return;
+        const previous = current.transcript;
+        const next = applyLiveTurn(previous, turn);
+        if (next === previous) return;
+        current.transcript = next;
+        publish(current);
+      }
+
       function markConnected(current) {
         if (current.over || current.connectedAt) return;
         current.status = "connected";
         current.connectedAt = Date.now();
+        if (!current.transcript.length) {
+          current.transcript = applyLiveTurn([], { role: "agent", message: SOL_OPENING_LINE, eventId: "tentative-agent", pending: true });
+        }
         publish(current);
         renderCall();
       }
@@ -846,7 +871,7 @@
           callerNumber: MY_NUMBER,
           muted: current.muted,
           mode: current.mode,
-          transcript: transcript.map(({ role, message }) => ({ role, message })),
+          transcript: liveTranscriptPayload(transcript),
         };
       }
       // Sends the whole call snapshot; the server keeps the newest by sequence number.

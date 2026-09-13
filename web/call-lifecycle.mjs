@@ -90,6 +90,16 @@ function turnIdentity(item, turn) {
   return item.role === turn.role && String(item.eventId) === String(turn.eventId);
 }
 
+export function liveTranscriptPayload(turns = []) {
+  return turns
+    .filter((turn) => (turn.role === "user" || turn.role === "agent") && turn.message)
+    .map((turn) => ({
+      role: turn.role,
+      message: turn.message,
+      pending: Boolean(turn.pending),
+    }));
+}
+
 export function applyLiveTurn(transcript = [], turn) {
   if (!turn?.role) return transcript;
   const next = transcript.slice();
@@ -196,4 +206,13 @@ export function staffCallPresentation(monitor = {}, localSessionId = null) {
   if (status === "connected") return { phase: isLocalCaller ? "handed-off" : "connected", isLocalCaller, sessionId };
   if (status === "ended") return { phase: "ended", isLocalCaller, sessionId };
   return { phase: "monitoring", isLocalCaller, sessionId };
+}
+
+export function operatorStaffPhase(monitor = {}, { answered = false } = {}) {
+  if (answered) return "connected";
+  const status = String(monitor?.handoffStatus || "");
+  if (status === "ringing") return "ringing";
+  if (monitor.source === "verified-webhook" && status === "connected") return "monitoring";
+  if (monitor.source === "verified-webhook" && status === "ended") return "ended";
+  return "idle";
 }

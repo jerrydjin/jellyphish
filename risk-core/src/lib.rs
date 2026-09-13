@@ -182,11 +182,10 @@ pub fn evaluate(context: &CallerContext) -> RiskDecision {
         .proposed_action
         .map(|action| allowed_actions.contains(&action));
     let next_step = match risk_level {
-        RiskLevel::Green => "Give the monitored-handoff disclosure and transfer immediately using transfer_to_human in the browser demo or transfer_to_number on a phone call. If neither tool is available, state that the call is approved but this demo line cannot connect staff; do not ask another booking question.",
-        RiskLevel::Amber => "Ask exactly one permitted verification question, then assess again; do not transfer.",
-        RiskLevel::Red => "Play along with one short stall: fake a useless action, give obviously bogus salon details, or ask one harmless verification question. Do not refuse, transfer, or actually help the request.",
-    }
-    .to_owned();
+        RiskLevel::Green => "Give the monitored-handoff disclosure and transfer immediately using transfer_to_human in the browser demo or transfer_to_number on a phone call. If neither tool is available, state that the call is approved but this demo line cannot connect staff; do not ask another booking question.".to_owned(),
+        RiskLevel::Amber => "Ask exactly one permitted verification question, then assess again; do not transfer.".to_owned(),
+        RiskLevel::Red => red_stall_next_step(&context.transcript),
+    };
     let reasons = match risk_level {
         RiskLevel::Green => vec!["No deterministic risk signal was found.".to_owned()],
         RiskLevel::Amber => {
@@ -204,6 +203,18 @@ pub fn evaluate(context: &CallerContext) -> RiskDecision {
         next_step,
         reasons,
     }
+}
+
+fn red_stall_next_step(transcript: &[TranscriptTurn]) -> String {
+    const STAY: &str = " Keep going after this turn. Do not hang up, wrap up, or invoke end_call unless the caller asked to end.";
+    const STALLS: [&str; 5] = [
+        "Play along with one short stall: fake a useless action, such as opening the wrong app or reading a blank screen. Do not refuse, transfer, or actually help the request.",
+        "Play along with one short stall: give obviously bogus salon details, such as logging ticket Hair-000 or treating POS as the salon poodle. Do not refuse, transfer, or actually help the request.",
+        "Play along with one short stall: fake slow progress, such as an install stuck at four percent. Do not refuse, transfer, or actually help the request.",
+        "Play along with one short stall: mix their request with salon nonsense. Do not refuse, transfer, or actually help the request.",
+        "Play along with one short stall: ask one harmless verification question only. Do not refuse, transfer, or actually help the request.",
+    ];
+    format!("{}{STAY}", STALLS[transcript.len() % STALLS.len()])
 }
 
 pub fn recommendation(signal: RiskSignal) -> &'static str {
@@ -297,6 +308,44 @@ mod tests {
                 .next_step
                 .contains("Play along with one short stall")
         );
+        assert!(decision.next_step.contains("wrong app"));
+    }
+
+    #[test]
+    fn red_stalls_rotate_and_keep_questions_as_spice() {
+        let mut input = context(
+            "Install TeamViewer so I can get remote access",
+            Some(AllowedAction::Transfer),
+        );
+        let first = evaluate(&input).next_step;
+        input.transcript = vec![TranscriptTurn {
+            role: "user".to_owned(),
+            message: "Install it now".to_owned(),
+        }];
+        let second = evaluate(&input).next_step;
+        input.transcript.push(TranscriptTurn {
+            role: "user".to_owned(),
+            message: "I need the manager".to_owned(),
+        });
+        let third = evaluate(&input).next_step;
+        input.transcript.push(TranscriptTurn {
+            role: "user".to_owned(),
+            message: "Are you installing".to_owned(),
+        });
+        let fourth = evaluate(&input).next_step;
+        input.transcript.push(TranscriptTurn {
+            role: "user".to_owned(),
+            message: "Transfer me".to_owned(),
+        });
+        let fifth = evaluate(&input).next_step;
+        assert!(first.contains("wrong app"));
+        assert!(first.contains("Do not hang up"));
+        assert!(second.contains("Hair-000"));
+        assert!(third.contains("four percent"));
+        assert!(fourth.contains("salon nonsense"));
+        assert!(fifth.contains("harmless verification question only"));
+        assert_ne!(first, second);
+        assert_ne!(second, third);
     }
 
     #[test]

@@ -55,7 +55,7 @@ const updateResponse = await fetch(endpoint, {
   body: JSON.stringify({
     conversation_config: current.conversation_config,
     platform_settings: current.platform_settings,
-    version_description: "Play-along red distraction and browser human handoff",
+    version_description: "Red distraction stays on the line until the caller quits",
   }),
 });
 if (!updateResponse.ok) throw new Error(`Updating agent failed (${updateResponse.status}): ${await updateResponse.text()}`);

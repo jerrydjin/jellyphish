@@ -20,6 +20,8 @@ const MAX_MESSAGE_CHARS: usize = 2_000;
 pub struct LiveTurn {
     pub role: String,
     pub message: String,
+    #[serde(default)]
+    pub pending: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -142,6 +144,7 @@ impl LiveHub {
             .map(|turn| LiveTurn {
                 role: turn.role,
                 message: clip(turn.message.trim(), MAX_MESSAGE_CHARS),
+                pending: turn.pending,
             })
             .filter(|turn| !turn.message.is_empty())
             .collect();

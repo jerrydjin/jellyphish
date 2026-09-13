@@ -48,6 +48,9 @@
       .topbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 50px 0 30px; }
       h1 { max-width: 760px; margin: 0; font-size: clamp(2.35rem, 4vw, 4rem); font-weight: 400; line-height: .98; letter-spacing: -.065em; }
       .live-card { position: relative; display: grid; grid-template-columns: minmax(240px, .7fr) minmax(0, 1.3fr); min-height: 246px; margin-bottom: 18px; border: 1px solid #cfcfca; border-radius: 0; overflow: hidden; background: rgba(255, 255, 255, .96); }
+      .live-card[data-route="green"] { box-shadow: inset 4px 0 0 var(--green); }
+      .live-card[data-route="amber"] { box-shadow: inset 4px 0 0 var(--amber); }
+      .live-card[data-route="red"] { box-shadow: inset 4px 0 0 var(--red); }
       .live-meta { padding: 26px; border-right: 1px solid var(--border); }
       .live-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
       .live-heading h2 { margin: 0; font-size: 1rem; font-weight: 400; letter-spacing: -.025em; }
@@ -71,6 +74,7 @@
       .live-transcript-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
       .transcript-label { color: #333330; font-size: .79rem; }
       .route-pill { color: #666662; background: transparent; }
+      .route-pill.green { color: var(--green); }
       .route-pill.amber { color: var(--amber); background: transparent; }
       .route-pill.red { color: var(--red); background: transparent; }
       .live-lines { height: 151px; overflow: auto; display: grid; align-content: start; gap: 12px; }
@@ -78,6 +82,8 @@
       .line { display: grid; grid-template-columns: 52px 1fr; gap: 10px; color: #333330; font-size: .84rem; line-height: 1.5; }
       .line-role { color: #8b8b87; font-size: .66rem; letter-spacing: 0; }
       .line.agent .line-role { color: #6a7500; }
+      .line.pending { color: var(--muted); }
+      .line.pending .line-text::after { content: "…"; }
 
       .monitor-card { margin-bottom: 18px; border: 1px solid var(--border); border-radius: 0; overflow: hidden; background: rgba(255, 255, 255, .94); }
       .monitor-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 17px 20px; border-bottom: 1px solid var(--border); }
@@ -98,9 +104,6 @@
       .alert-label { margin-bottom: 7px; color: var(--red); font-size: .72rem; font-weight: 400; letter-spacing: 0; }
       .alert-action { margin: 0 0 9px; color: #391916; font-size: .92rem; font-weight: 400; line-height: 1.4; }
       .alert-evidence { margin: 0; color: #875653; font-size: .73rem; line-height: 1.45; }
-      .monitor-head-actions { display: flex; align-items: center; gap: 16px; }
-      .demo-handoff { padding: 8px 0; border: 0; color: #3d3d3a; background: transparent; cursor: pointer; font-size: .72rem; font-weight: 400; text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }
-      .demo-handoff:hover, .demo-handoff:focus-visible { color: #111; outline: none; }
       .monitor-card.ringing { box-shadow: inset 4px 0 0 var(--green); }
       .monitor-card.live { box-shadow: inset 4px 0 0 var(--accent); }
       .staff-stage { display: grid; grid-template-columns: minmax(220px, .7fr) minmax(0, 1.3fr); min-height: 246px; }
@@ -124,17 +127,18 @@
       .section-head h2 { margin: 0; font-size: .92rem; font-weight: 400; }
       .section-head span { color: var(--muted); font-size: .71rem; }
       .call-list { max-height: 630px; overflow: auto; }
-      .call-row { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 11px; align-items: center; padding: 14px 16px; border: 0; border-bottom: 1px solid #ededeb; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+      .call-row { width: 100%; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 11px; align-items: center; padding: 14px 16px; border: 0; border-bottom: 1px solid #ededeb; color: inherit; background: transparent; text-align: left; cursor: pointer; }
       .call-row:hover, .call-row:focus-visible, .call-row.selected { background: #f8f8f5; outline: none; }
       .call-row.selected { box-shadow: inset 3px 0 0 var(--accent); }
+      .route-block { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 0; background: transparent; color: #777773; font-size: .78rem; font-weight: 400; }
+      .route-block.green { color: var(--green); }
+      .route-block.amber { color: var(--amber); }
+      .route-block.red { color: var(--red); }
       .call-copy { min-width: 0; }
       .call-title { display: block; overflow: hidden; color: #222220; font-size: .83rem; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
       .call-sub { display: block; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: .71rem; text-overflow: ellipsis; white-space: nowrap; }
       .call-time { color: var(--subtle); font-size: .69rem; text-align: right; white-space: nowrap; }
       .call-time-clock { display: block; margin-bottom: 4px; color: #70706c; }
-      .call-flag { color: #777773; font-size: .72rem; }
-      .call-flag.amber { color: var(--amber); }
-      .call-flag.red { color: var(--red); }
       .detail { min-width: 0; }
       .detail-scroll { max-height: 630px; overflow: auto; padding: 22px; }
       .detail-title { margin: 0 0 6px; font-size: 1.14rem; font-weight: 400; letter-spacing: -.045em; }
@@ -219,10 +223,7 @@
       <section class="monitor-card" id="monitor-card" aria-labelledby="monitor-title">
         <div class="monitor-head">
           <div class="monitor-title"><h2 id="monitor-title">Monitored human handoff</h2><span id="monitor-subtitle">No transferred call</span></div>
-          <div class="monitor-head-actions">
-            <button class="demo-handoff" id="handoff-demo" type="button">Run monitored handoff</button>
-            <span class="status-pill idle" id="monitor-status">Idle</span>
-          </div>
+          <span class="status-pill idle" id="monitor-status">Idle</span>
         </div>
         <audio id="handoff-remote" autoplay playsinline></audio>
         <div class="staff-stage">
@@ -257,7 +258,7 @@
       </section>
     </main>
     <script type="module">
-      import { conversationListFingerprint, effectiveConversationStatus, liveElapsedSeconds, shouldAutoselectConversation, staffCallPresentation } from "./call-lifecycle.mjs";
+      import { conversationListFingerprint, effectiveConversationStatus, liveElapsedSeconds, operatorStaffPhase, routePresentation, shouldAutoselectConversation } from "./call-lifecycle.mjs";
       import { fetchHandoffRoom, HandoffCall } from "./handoff-call.mjs";
 
       // The business line this dashboard answers for. Callers reach it from /phone/.
@@ -288,7 +289,7 @@
       let assessmentSequence = 0;
       let assessedUserTurns = 0;
       async function assessLive() {
-        const callerTurns = state.live.transcript.filter((turn) => turn.role === "user");
+        const callerTurns = state.live.transcript.filter((turn) => turn.role === "user" && !turn.pending);
         if (!callerTurns.length) return;
         const sequence = ++assessmentSequence;
         const text = callerTurns.map((turn) => turn.message).join(" ");
@@ -311,60 +312,56 @@
           if (sequence === assessmentSequence) {
             state.live.route = null;
             $("live-route").textContent = "Policy unavailable · no transfer";
+            $("live-route").className = "route-pill";
           }
         }
       }
       function renderMonitor(monitor = state.monitor) {
-        // This page is the staff console. Never treat the mirrored live call as "local caller",
-        // or Answer would stay hidden after Sol transfers from /phone/.
-        const presentation = staffCallPresentation(monitor);
-        const idle = presentation.phase === "idle";
-        const ringing = presentation.phase === "ringing";
-        const onStaffLine = presentation.phase === "connected" || presentation.phase === "handed-off";
-        const waiting = presentation.phase === "waiting";
+        const phase = operatorStaffPhase(monitor, { answered: Boolean(staffCall) });
+        const idle = phase === "idle";
+        const ringing = phase === "ringing";
+        const onStaffLine = phase === "connected";
         const degraded = monitor?.monitorStatus === "degraded";
-        const labels = { idle: "Idle", ringing: "Incoming", waiting: "Ringing staff", connected: "On call", "handed-off": "Handed off", ended: "Ended", monitoring: "Monitoring" };
+        const labels = { idle: "Idle", ringing: "Incoming", connected: "On call", ended: "Ended", monitoring: "Monitoring" };
         $("monitor-card").classList.toggle("ringing", ringing);
         $("monitor-card").classList.toggle("live", onStaffLine);
-        $("monitor-status").textContent = degraded ? "Degraded" : (labels[presentation.phase] || "Idle");
-        $("monitor-status").classList.toggle("idle", idle || presentation.phase === "ended" || degraded);
+        $("monitor-status").textContent = degraded ? "Degraded" : (labels[phase] || "Idle");
+        $("monitor-status").classList.toggle("idle", idle || phase === "ended" || degraded);
         $("monitor-status").classList.toggle("ringing", ringing);
         const callerLabel = incomingRoom?.callerName || "the caller";
         const action = incomingRoom?.requestedAction || "";
         const subtitles = {
           idle: "No transferred call",
           ringing: action ? `Incoming · ${callerLabel} · ${action}` : `Incoming · ${callerLabel}`,
-          waiting: "Waiting for a staff member on the operator console",
           connected: `On with ${callerLabel}`,
-          "handed-off": "You're connected to Studio Sol staff",
           ended: "Staff call ended",
           monitoring: monitor?.sessionId ? `Human call · ${monitor.sessionId}` : "Human call",
         };
-        $("monitor-subtitle").textContent = degraded ? "Transfer connected · sidecar unavailable" : (subtitles[presentation.phase] || subtitles.idle);
+        $("monitor-subtitle").textContent = degraded ? "Transfer connected · sidecar unavailable" : (subtitles[phase] || subtitles.idle);
         $("staff-caption").textContent = ringing
           ? "Sol approved this caller. Answer to take over the line."
-          : waiting
-            ? "Stay on the line. A staff member is being connected."
-            : onStaffLine
-              ? "Sol is silent. This is a live staff conversation."
-              : presentation.phase === "ended"
-                ? "The staff call has ended."
+          : onStaffLine
+            ? "Sol is silent. This is a live staff conversation."
+            : phase === "ended"
+              ? "The staff call has ended."
+              : phase === "monitoring"
+                ? "Read-only monitor · the human conference is already connected."
                 : "Waiting for Sol to hand off a screened caller";
-        $("staff-route").textContent = ringing ? "Incoming" : onStaffLine ? "Live" : waiting ? "Connecting" : "Human line";
-        $("staff-answer").hidden = !ringing || Boolean(staffCall);
+        $("staff-route").textContent = ringing ? "Incoming" : onStaffLine ? "Live" : "Human line";
+        $("staff-answer").hidden = !ringing;
         $("staff-mute").hidden = !staffCall;
-        $("staff-hangup").hidden = !(staffCall || ringing || waiting);
+        $("staff-hangup").hidden = !(staffCall || ringing);
         $("staff-mute").classList.toggle("on", Boolean(staffCall?.muted));
         $("staff-mute").textContent = staffCall?.muted ? "Unmute" : "Mute";
         $("sidecar-meta").innerHTML = idle
           ? `<span class="sidecar-tag">Staff pickup</span><span class="sidecar-tag">AI silent after handoff</span>`
-          : `<span class="sidecar-tag ${monitor.disclosureGiven ? "ok" : ""}">${monitor.disclosureGiven ? "Disclosure given" : "Disclosure missing"}</span><span class="sidecar-tag ${monitor.aiMuted ? "ok" : ""}">${monitor.aiMuted ? "AI silent" : "Check AI state"}</span><span class="sidecar-tag ${!degraded && !idle ? "ok" : ""}">${degraded ? "Transfer preserved" : onStaffLine || waiting || ringing ? "Live staff line" : "Transcript streaming"}</span>`;
-        const transcript = monitor?.transcript || [];
+          : `<span class="sidecar-tag ${monitor.disclosureGiven ? "ok" : ""}">${monitor.disclosureGiven ? "Disclosure given" : "Disclosure missing"}</span><span class="sidecar-tag ${monitor.aiMuted ? "ok" : ""}">${monitor.aiMuted ? "AI silent" : "Check AI state"}</span><span class="sidecar-tag ${!degraded && !idle ? "ok" : ""}">${degraded ? "Transfer preserved" : onStaffLine || ringing ? "Live staff line" : "Transcript streaming"}</span>`;
+        const transcript = idle ? [] : (monitor?.transcript || []);
         $("sidecar-lines").innerHTML = transcript.length
           ? transcript.map((turn) => `<div class="line ${escapeHTML(turn.role)}"><span class="line-role">${turn.role === "staff" ? "Staff" : "Caller"}</span><span class="line-text">${escapeHTML(turn.text)}</span></div>`).join("")
-          : `<p class="empty">${degraded ? `Monitoring failed, but the human transfer remains connected. ${escapeHTML(monitor.error || "")}` : ringing ? "Answer to start the live staff transcript." : waiting ? "Connecting you now. Keep talking after staff picks up." : "When Sol hands off, pick up here. Speech from the caller and this staff line will write in live."}</p>`;
+          : `<p class="empty">${degraded ? `Monitoring failed, but the human transfer remains connected. ${escapeHTML(monitor.error || "")}` : ringing ? "Answer to start the live staff transcript." : "When Sol hands off, pick up here. Speech from the caller and this staff line will write in live."}</p>`;
         $("sidecar-lines").scrollTop = $("sidecar-lines").scrollHeight;
-        const alerts = monitor?.alerts || [];
+        const alerts = idle ? [] : (monitor?.alerts || []);
         const alert = alerts.find((item) => item.signals.some((signal) => signal.id === "payment_or_account_change")) || alerts.at(-1);
         $("handoff-alert").innerHTML = alert
           ? `<div class="alert-card"><div class="alert-label">High-risk signal · ${escapeHTML(alert.signals.map((signal) => signal.label).join(", "))}</div><p class="alert-action">${escapeHTML(alert.recommendedAction)}</p><p class="alert-evidence"><span>Evidence: </span>“${escapeHTML(alert.evidence)}”</p></div>`
@@ -405,11 +402,11 @@
         const scroll = list.scrollTop;
         $("history-count").textContent = `${state.conversations.length} retained`;
         list.innerHTML = state.conversations.length ? state.conversations.map((call) => {
-          const route = routeOf(call);
-          const flag = route === "red" ? '<span class="call-flag red">Hold</span>' : route === "amber" ? '<span class="call-flag amber">Review</span>' : "";
+          const route = routePresentation(routeOf(call));
+          const letter = route.route === "unclassified" ? "?" : route.route[0].toUpperCase();
           const subtitle = call.data?.outcome ? humanOutcome(call) : call.summary || humanOutcome(call);
           const duration = call.id === state.endedCall?.id && !call.duration ? state.endedCall.duration : call.duration;
-          return `<button class="call-row ${call.id === state.selectedId ? "selected" : ""}" data-id="${escapeHTML(call.id)}" type="button"><span class="call-copy"><span class="call-title">${escapeHTML(displayTitle(call))}</span><span class="call-sub">${escapeHTML(subtitle)}</span></span>${flag}<span class="call-time"><span class="call-time-clock">${formatClock(call.startedAt)}</span>${formatDuration(duration)}</span></button>`;
+          return `<button class="call-row ${call.id === state.selectedId ? "selected" : ""}" data-id="${escapeHTML(call.id)}" type="button"><span class="route-block ${escapeHTML(route.route)}" title="${escapeHTML(route.label)}">${escapeHTML(letter)}</span><span class="call-copy"><span class="call-title">${escapeHTML(displayTitle(call))}</span><span class="call-sub">${escapeHTML(subtitle)}</span></span><span class="call-time"><span class="call-time-clock">${formatClock(call.startedAt)}</span>${formatDuration(duration)}</span></button>`;
         }).join("") : `<p class="empty" style="padding:24px">No calls yet.</p>`;
         list.scrollTop = scroll;
       }
@@ -425,16 +422,16 @@
       function renderLive() {
         const live = state.live;
         const view = liveView(live);
-        const route = live.route;
+        const presentation = routePresentation(live.route);
         $("live-card").classList.toggle("active", live.active);
+        $("live-card").dataset.route = presentation.route === "unclassified" ? "" : presentation.route;
         $("live-status").textContent = view.pill;
         $("live-status").className = `status-pill ${view.tone}`;
         $("live-caller").textContent = live.callerNumber ? (live.active || live.ringing ? live.callerNumber : `Last caller · ${live.callerNumber}`) : "No active caller";
         $("live-caption").textContent = view.caption;
-        const liveLabel = route === "red" ? "Hold" : route === "amber" ? "Review" : route === "green" ? "Screened" : "Not classified";
-        $("live-route").textContent = liveLabel;
-        $("live-route").className = `route-pill ${route === "green" ? "" : route || ""}`;
-        $("live-lines").innerHTML = live.transcript.length ? live.transcript.slice(-8).map((turn) => `<div class="line ${escapeHTML(turn.role)}"><span class="line-role">${turn.role === "agent" ? "Sol" : "Caller"}</span><span>${escapeHTML(turn.message)}</span></div>`).join("") : `<p class="empty">${view.empty}</p>`;
+        $("live-route").textContent = presentation.label;
+        $("live-route").className = `route-pill ${presentation.route}`;
+        $("live-lines").innerHTML = live.transcript.length ? live.transcript.slice(-8).map((turn) => `<div class="line ${escapeHTML(turn.role)}${turn.pending ? " pending" : ""}"><span class="line-role">${turn.role === "agent" ? "Sol" : "Caller"}</span><span class="line-text">${escapeHTML(turn.message)}</span></div>`).join("") : `<p class="empty">${view.empty}</p>`;
         $("live-lines").scrollTop = $("live-lines").scrollHeight;
         $("live-time").textContent = formatDuration(liveElapsedSeconds(live, serverNow()));
       }
@@ -470,7 +467,7 @@
         };
         if (state.live.active && !(sameCall && previous.active)) setTimeout(refreshConversations, 1200);
         if (finished && wasLive) handleLiveEnded();
-        const userTurns = state.live.transcript.filter((turn) => turn.role === "user").length;
+        const userTurns = state.live.transcript.filter((turn) => turn.role === "user" && !turn.pending).length;
         if (!finished && userTurns > assessedUserTurns) { assessedUserTurns = userTurns; assessLive(); }
         renderLive();
       }
@@ -557,22 +554,6 @@
       });
       monitorEvents.addEventListener("error", () => {
         if (!state.monitor?.sessionId) $("monitor-subtitle").textContent = "Sidecar connection unavailable";
-      });
-      $("handoff-demo").addEventListener("click", async () => {
-        const button = $("handoff-demo");
-        button.disabled = true;
-        button.textContent = "Running handoff…";
-        try {
-          const response = await fetch("/api/monitor/demo", { method: "POST" });
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.error || "Could not run the demo");
-          state.monitor = result;
-          renderMonitor();
-        } catch (error) {
-          $("monitor-subtitle").textContent = error.message;
-        } finally {
-          setTimeout(() => { button.disabled = false; button.textContent = "Run monitored handoff"; }, 1600);
-        }
       });
       async function refreshConversations({ forceDetail = false } = {}) {
         try {

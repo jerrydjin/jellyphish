@@ -41,7 +41,7 @@ Local demo endpoints do not require HMAC:
 - `POST /api/handoff/hangup`
 - `GET /api/handoff/{id}`
 
-Open the operator console on one tab or machine, and the demo caller on another. When Sol hands off, pick up on the home page. The simulated **Run monitored handoff** button still exercises the SSE alert path without audio.
+Open the operator console on one tab or machine, and the demo caller at `/phone/` on another. When Sol hands off, pick up on the home page.
 
 ## Safety behavior
 
@@ -52,4 +52,4 @@ Open the operator console on one tab or machine, and the demo caller on another.
 
 ## Infrastructure boundary
 
-A real sidecar still needs a Twilio or SIP conference media stream. No phone number, carrier credentials, or human destination is included in this repository. Until those exist, the browser staff line and timed handoff simulation are the verifiable demo surfaces.
+A real sidecar still needs a Twilio or SIP conference media stream. No phone number, carrier credentials, or human destination is included in this repository. Until those exist, the browser staff line on the home page is the verifiable demo surface: call from `/phone/`, then pick up when Sol hands off.

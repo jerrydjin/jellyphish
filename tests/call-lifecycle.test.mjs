@@ -87,6 +87,21 @@ test("partial transcripts update in place and finals replace them without droppi
   );
 });
 
+test("live snapshots keep pending flags so the dashboard can stream captions", async () => {
+  const { liveTranscriptPayload } = await import("../web/call-lifecycle.mjs");
+  assert.deepEqual(
+    liveTranscriptPayload([
+      { role: "agent", message: "Thanks for calling", pending: true, eventId: "tentative-agent" },
+      { role: "user", message: "Hi I need a", pending: true },
+      { role: "system", message: "ignore me" },
+    ]),
+    [
+      { role: "agent", message: "Thanks for calling", pending: true },
+      { role: "user", message: "Hi I need a", pending: true },
+    ],
+  );
+});
+
 test("history polling does not steal a user-selected call after the list refreshes", () => {
   const conversations = [{ id: "conv-new" }, { id: "conv-old" }];
   assert.equal(
@@ -135,6 +150,18 @@ test("operator home page rings only for a remote handed-off caller", async () =>
     sessionId: "conv_1",
   });
   assert.equal(staffCallPresentation({ sessionId: "conv_1", handoffStatus: "connected" }).phase, "connected");
+});
+
+test("the operator staff line stays idle until a real ring or this console answers", async () => {
+  const { operatorStaffPhase } = await import("../web/call-lifecycle.mjs");
+  assert.equal(operatorStaffPhase({}), "idle");
+  assert.equal(operatorStaffPhase({ sessionId: "demo_1", handoffStatus: "connected", source: "local-demo" }), "idle");
+  assert.equal(operatorStaffPhase({ sessionId: "conv_1", handoffStatus: "ringing" }), "ringing");
+  assert.equal(operatorStaffPhase({ sessionId: "conv_1", handoffStatus: "connected", source: "browser-handoff" }), "idle");
+  assert.equal(operatorStaffPhase({ sessionId: "conv_1", handoffStatus: "connected", source: "browser-handoff" }, { answered: true }), "connected");
+  assert.equal(operatorStaffPhase({ sessionId: "sip_1", handoffStatus: "connected", source: "verified-webhook" }), "monitoring");
+  assert.equal(operatorStaffPhase({ sessionId: "conv_1", handoffStatus: "ended", source: "browser-handoff" }), "idle");
+  assert.equal(operatorStaffPhase({ sessionId: "sip_1", handoffStatus: "ended", source: "verified-webhook" }), "ended");
 });
 
 test("caller previews keep a short name and request for the incoming staff line", async () => {

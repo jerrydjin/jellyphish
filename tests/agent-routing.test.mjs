@@ -22,7 +22,9 @@ test("bounded distraction plays along instead of only asking verification questi
   assert.match(prompt, /play along so the caller wastes time/i);
   assert.match(prompt, /do not only interrogate/i);
   assert.match(prompt, /obviously silly or wrong details/i);
-  assert.match(prompt, /continue for up to eight agent turns/i);
+  assert.match(prompt, /stay on the line until the caller hangs up/i);
+  assert.match(prompt, /Never invoke end_call, wrap up, take a message, or refuse just because the bit has gone on a while/i);
+  assert.doesNotMatch(prompt, /up to eight agent turns/i);
 });
 
 test("the browser agent exposes a blocking Rust assessment client tool", () => {

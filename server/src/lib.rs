@@ -980,6 +980,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn live_call_relays_pending_transcript_turns() {
+        let app = test_app().await;
+        let body = json!({
+            "callId": "call-stream",
+            "seq": 1,
+            "status": "connected",
+            "transcript": [
+                { "role": "agent", "message": "Thanks for calling", "pending": true },
+                { "role": "user", "message": "Hi I need a", "pending": true }
+            ]
+        });
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/live/studio-sol")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+        let snapshot = live_snapshot(&app).await;
+        assert_eq!(snapshot["call"]["transcript"][0]["pending"], true);
+        assert_eq!(snapshot["call"]["transcript"][1]["message"], "Hi I need a");
+        assert_eq!(snapshot["call"]["transcript"][1]["pending"], true);
+    }
+
+    #[tokio::test]
     async fn live_relay_rejects_unknown_lines_and_statuses() {
         let app = test_app().await;
         let response = app
