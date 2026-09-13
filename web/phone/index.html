@@ -163,6 +163,7 @@
       .call-digits { font-variant-numeric: tabular-nums; letter-spacing: .04em; }
       .call-status { margin-top: 6px; color: rgba(255, 255, 255, .72); font-size: 17px; font-variant-numeric: tabular-nums; transition: color .2s; }
       .ended .call-status { color: #fff; }
+      .call-reason { max-width: 290px; margin: 12px auto 0; color: rgba(255, 255, 255, .62); font-size: 14px; line-height: 1.4; white-space: normal; animation: panel-in .3s ease; }
       .call-body { position: relative; width: 100%; flex: 1; }
       .call-controls, .call-keys { position: absolute; right: 0; bottom: 0; left: 0; display: flex; justify-content: center; transition: opacity .22s ease, transform .4s var(--ios); }
       .call-controls { gap: 70px; }
@@ -322,6 +323,7 @@
                 <div class="call-name" id="call-name"></div>
                 <div class="call-digits" id="call-digits" hidden></div>
                 <div class="call-status" id="call-status" aria-live="polite">calling…</div>
+                <div class="call-reason" id="call-reason" hidden></div>
               </div>
               <div class="call-body">
                 <div class="call-controls">
@@ -681,7 +683,10 @@
         current.timers.push(setInterval(() => publish(current), 5000));
         await clientReady;
         if (current.over) return;
-        if (!ConversationClient) return finishCall(current, "Call Failed");
+        if (!ConversationClient) {
+          current.error = "The calling client could not be loaded.";
+          return finishCall(current, "Call Failed");
+        }
         try {
           const session = await ConversationClient.startSession({
             agentId: LINES[current.line].agentId,
@@ -692,9 +697,15 @@
             },
             onStatusChange: ({ status }) => {
               if (status === "connected") markConnected(current);
-              if (status === "disconnected") finishCall(current);
+              // Before pickup, a "disconnected" status means startSession is about to throw; the catch reports why.
+              if (status === "disconnected" && current.connectedAt) finishCall(current);
             },
-            onDisconnect: () => finishCall(current),
+            onDisconnect: (details) => {
+              console.warn("[phone] call disconnected", details);
+              const failed = details?.reason === "error";
+              if (failed) current.error ||= details?.message;
+              finishCall(current, failed || !current.connectedAt ? "Call Failed" : "Call Ended");
+            },
             onModeChange: ({ mode }) => {
               if (current.over || current.mode === mode) return;
               current.mode = mode;
@@ -717,7 +728,11 @@
               turn.message = corrected;
               publish(current);
             },
-            onError: () => { if (!current.connectedAt) finishCall(current, "Call Failed"); },
+            onError: (message, context) => {
+              console.error("[phone] call error", message, context);
+              current.error ||= String(message || "");
+              if (!current.connectedAt) finishCall(current, "Call Failed");
+            },
           });
           if (current.over) {
             Promise.resolve(session?.endSession?.()).catch(() => {});
@@ -727,7 +742,9 @@
           if (session?.getId && !current.conversationId) current.conversationId = session.getId();
           if (current.muted) session.setMicMuted?.(true);
           markConnected(current);
-        } catch {
+        } catch (error) {
+          console.error("[phone] could not start call", error);
+          current.error ||= error instanceof Error ? `${error.name}: ${error.message}` : String(error || "");
           finishCall(current, "Call Failed");
         }
       }
@@ -765,7 +782,7 @@
           $("view-call").inert = true;
           if (screen.classList.contains("card-open")) $("view-card").inert = false;
           else $("view-tabs").inert = false;
-        }, label === "Call Ended" ? 1100 : 1700);
+        }, label === "Call Ended" ? 1100 : label === "Call Failed" ? 3600 : 1700);
       }
 
       function livePayload(current, transcript = current.transcript) {
@@ -827,11 +844,20 @@
         if (!call) return;
         $("call-status").textContent = call.over ? call.endLabel : call.connectedAt ? clockText(Date.now() - call.connectedAt) : "calling…";
       }
+      function failureReason(error = "") {
+        if (/NotAllowed|Permission|denied/i.test(error)) return "Microphone access is blocked. Allow the microphone for this site, then call again.";
+        if (/NotFound|no.*device|Requested device/i.test(error)) return "No microphone was found.";
+        if (/NotReadable|in use|Could not start/i.test(error)) return "The microphone is being used by another app.";
+        return error ? error.slice(0, 140) : "The line could not be reached.";
+      }
       function renderCall() {
         if (!call) return;
         const view = $("view-call");
         view.classList.toggle("keypad-open", call.keypad && !call.over);
         view.classList.toggle("ended", call.over);
+        const failed = call.over && call.endLabel === "Call Failed";
+        $("call-reason").textContent = failed ? failureReason(call.error) : "";
+        $("call-reason").hidden = !failed;
         const showDigits = call.keypad && Boolean(call.digits) && !call.over;
         $("call-name").textContent = call.contact.name;
         $("call-name").hidden = showDigits;
