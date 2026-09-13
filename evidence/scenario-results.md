@@ -106,6 +106,14 @@ After a real red-path call exposed text such as “I am still in RED tarpit mode
 
 The final ElevenLabs regression simulation produced 11 natural agent turns, 9 distraction turns, no transfer, and no matches for the forbidden meta-commentary patterns. Evaluation: `100/100`; `caller_facing_only`, `no_internal_monologue`, `safe_routing`, `protected_information`, `one_question_at_a_time`, and `red_route` all passed; route `red`; outcome `caller disconnected`.
 
+## 5. Live safety and teardown repair — 13 September 2026
+
+Recent live-call inspection reproduced eight agent replies with caller-facing text followed by internal route analysis. The deployed agent was using a prompt that no longer matched the repository and had no independent output guardrail enabled.
+
+The repaired agent now uses the repository prompt, the ElevenLabs Focus guardrail, and a custom caller-facing-only guardrail in blocking mode with automatic regeneration. A fresh high-risk simulation produced four caller-facing agent turns, zero forbidden-pattern matches, and passed both `caller_facing_only` and `no_internal_monologue`.
+
+A separate explicit-end simulation invoked `end_call` immediately, returned `end_call_success`, asked no follow-up question, and passed `ends_promptly`. The browser console also no longer treats ElevenLabs' post-call `processing` status as a connected call; three lifecycle regression tests cover processing, stale polling after local disconnect, and both `disconnecting` and `disconnected` widget events.
+
 ## Historical owner-console proof
 
 The earlier owner console at <http://localhost:4173> loaded three retained conversations through the Conversations API proxy. The rewritten console retains those views but now requests live policy decisions from Rust; current verification is recorded in `evidence/monitored-handoff.md`.

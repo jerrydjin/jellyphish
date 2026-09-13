@@ -27,12 +27,11 @@
       html { scroll-behavior: smooth; }
       body { margin: 0; min-height: 100vh; background: var(--canvas); color: var(--ink); font-size: 16px; }
       button { font: inherit; }
-      strong, b { font-weight: 400; }
       .site-nav { position: sticky; top: 0; z-index: 10; border-top: 8px solid #161616; border-bottom: 1px solid #e9e9e5; background: rgba(255, 255, 255, .96); backdrop-filter: blur(14px); }
       .nav-inner { min-height: 72px; display: flex; align-items: center; gap: 40px; padding: 0 34px; }
       .nav-brand { display: flex; align-items: center; gap: 10px; min-width: 155px; }
       .brand-mark { width: 31px; height: 31px; display: grid; place-items: center; border-radius: 9px; color: #111; background: var(--accent); font-size: .9rem; font-weight: 400; }
-      .nav-brand strong { font-size: 1.02rem; font-weight: 400; letter-spacing: -.04em; }
+      .brand-name { font-size: 1.02rem; letter-spacing: -.04em; }
       .nav-links { display: flex; align-items: center; gap: 28px; }
       .nav-links a { color: #292929; font-size: .8rem; font-weight: 400; text-decoration: none; }
       .nav-links a:hover, .nav-links a:focus-visible { text-decoration: underline; outline: none; }
@@ -76,16 +75,15 @@
       @keyframes wave { to { height: 27px; opacity: 1; background: var(--accent); } }
       .live-transcript { min-width: 0; padding: 26px; }
       .live-transcript-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
-      .live-transcript-head strong { color: #333330; font-size: .79rem; }
+      .transcript-label { color: #333330; font-size: .79rem; }
       .route-pill { color: #666662; background: transparent; }
-      .route-pill.green { color: var(--green); background: transparent; }
       .route-pill.amber { color: var(--amber); background: transparent; }
       .route-pill.red { color: var(--red); background: transparent; }
       .live-lines { height: 151px; overflow: auto; display: grid; align-content: start; gap: 12px; }
       .empty { margin: auto 0; color: var(--subtle); font-size: .84rem; line-height: 1.55; }
       .line { display: grid; grid-template-columns: 52px 1fr; gap: 10px; color: #333330; font-size: .84rem; line-height: 1.5; }
-      .line b { color: #8b8b87; font-size: .66rem; letter-spacing: 0; }
-      .line.agent b { color: #6a7500; }
+      .line-role { color: #8b8b87; font-size: .66rem; letter-spacing: 0; }
+      .line.agent .line-role { color: #6a7500; }
 
       .monitor-card { margin-bottom: 18px; border: 1px solid var(--border); border-radius: 0; overflow: hidden; background: rgba(255, 255, 255, .94); }
       .monitor-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 17px 20px; border-bottom: 1px solid var(--border); }
@@ -99,7 +97,7 @@
       .sidecar-tag.ok { color: var(--green); background: transparent; }
       .sidecar-lines { max-height: 150px; overflow: auto; display: grid; gap: 8px; }
       .sidecar-line { display: grid; grid-template-columns: 50px 1fr; gap: 9px; color: #454542; font-size: .78rem; line-height: 1.45; }
-      .sidecar-line b { color: var(--muted); font-size: .68rem; }
+      .sidecar-role { color: var(--muted); font-size: .68rem; }
       .alerts { padding: 18px 20px; background: #fbfbf9; }
       .alert-empty { color: var(--subtle); font-size: .79rem; line-height: 1.55; }
       .alert-card { padding: 15px; border: 1px solid #e0b3af; border-radius: 4px; background: #fff7f6; }
@@ -113,26 +111,31 @@
       .section-head h2 { margin: 0; font-size: .92rem; font-weight: 400; }
       .section-head span { color: var(--muted); font-size: .71rem; }
       .call-list { max-height: 630px; overflow: auto; }
-      .call-row { width: 100%; display: grid; grid-template-columns: 38px 1fr auto; gap: 11px; align-items: center; padding: 14px 16px; border: 0; border-bottom: 1px solid #ededeb; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+      .call-row { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 11px; align-items: center; padding: 14px 16px; border: 0; border-bottom: 1px solid #ededeb; color: inherit; background: transparent; text-align: left; cursor: pointer; }
       .call-row:hover, .call-row:focus-visible, .call-row.selected { background: #f8f8f5; outline: none; }
       .call-row.selected { box-shadow: inset 3px 0 0 var(--accent); }
-      .route-block { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 0; background: transparent; color: #777773; font-size: .78rem; font-weight: 400; }
-      .route-block.green { color: var(--green); background: transparent; }
-      .route-block.amber { color: var(--amber); background: transparent; }
-      .route-block.red { color: var(--red); background: transparent; }
       .call-copy { min-width: 0; }
       .call-title { display: block; overflow: hidden; color: #222220; font-size: .83rem; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
       .call-sub { display: block; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: .71rem; text-overflow: ellipsis; white-space: nowrap; }
       .call-time { color: var(--subtle); font-size: .69rem; text-align: right; white-space: nowrap; }
-      .call-time b { display: block; margin-bottom: 4px; color: #70706c; font-weight: 400; }
+      .call-time-clock { display: block; margin-bottom: 4px; color: #70706c; }
+      .call-flag { color: #777773; font-size: .72rem; }
+      .call-flag.amber { color: var(--amber); }
+      .call-flag.red { color: var(--red); }
       .detail { min-width: 0; }
       .detail-scroll { max-height: 630px; overflow: auto; padding: 22px; }
-      .detail-title { margin: 0 0 6px; font-size: 1.14rem; letter-spacing: -.045em; }
+      .detail-title { margin: 0 0 6px; font-size: 1.14rem; font-weight: 400; letter-spacing: -.045em; }
       .detail-summary { margin: 0 0 20px; color: var(--muted); font-size: .83rem; line-height: 1.55; }
       .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-bottom: 21px; }
       .fact { min-width: 0; padding: 11px; border: 1px solid var(--border); border-radius: 0; background: #fbfbf9; }
       .fact small { display: block; margin-bottom: 5px; color: var(--subtle); font-size: .7rem; letter-spacing: 0; }
-      .fact strong { display: block; overflow: hidden; color: #333330; font-size: .77rem; text-overflow: ellipsis; white-space: nowrap; }
+      .fact-value { display: block; overflow: hidden; color: #333330; font-size: .77rem; text-overflow: ellipsis; white-space: nowrap; }
+      .detail-inspector { margin-bottom: 20px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+      .detail-inspector summary { padding: 12px 0; color: #555550; cursor: pointer; font-size: .78rem; list-style: none; }
+      .detail-inspector summary::-webkit-details-marker { display: none; }
+      .detail-inspector summary::after { content: "+"; float: right; color: var(--subtle); font-size: 1rem; }
+      .detail-inspector[open] summary::after { content: "−"; }
+      .detail-inspector .facts { padding-bottom: 14px; }
       .risk { margin-bottom: 20px; padding: 13px 14px; border-left: 3px solid var(--red); border-radius: 0; background: #fff7f6; color: #713a36; font-size: .79rem; line-height: 1.5; }
       .notice { margin-bottom: 16px; padding: 12px 14px; border: 1px solid #e4d19c; border-radius: 0; background: #fffaf0; color: #785a17; font-size: .75rem; line-height: 1.5; }
       .transcript { display: grid; gap: 10px; }
@@ -175,7 +178,7 @@
   <body>
     <header class="site-nav">
       <div class="nav-inner">
-        <div class="nav-brand"><div class="brand-mark">S</div><div><strong>Studio Sol</strong></div></div>
+        <div class="nav-brand"><div class="brand-mark">S</div><div><span class="brand-name">Studio Sol</span></div></div>
         <nav class="nav-links" aria-label="Primary navigation">
           <a href="#overview">Overview</a>
           <a href="#live-card">Live calls</a>
@@ -212,7 +215,7 @@
             <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
           </div>
           <div class="live-transcript">
-            <div class="live-transcript-head"><strong>Live transcript</strong><span class="route-pill" id="live-route">Not classified</span></div>
+            <div class="live-transcript-head"><span class="transcript-label">Live transcript</span><span class="route-pill" id="live-route">Not classified</span></div>
             <div class="live-lines" id="live-lines"><p class="empty">Speech will appear here while the call is running.</p></div>
           </div>
         </section>
@@ -241,11 +244,12 @@
         </section>
       </main>
     </div>
-    <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
-    <script>
-      const state = { conversations: [], selectedId: null, live: { active: false, startedAt: 0, transcript: [], route: null }, monitor: { status: "idle" }, loadingDetail: false };
+    <script src="https://unpkg.com/@elevenlabs/convai-widget-embed@0.18.2" async type="text/javascript"></script>
+    <script type="module">
+      import { isEndingWidgetStatus, isRemoteConversationLive } from "./call-lifecycle.mjs";
+
+      const state = { conversations: [], selectedId: null, live: { active: false, startedAt: 0, endedAt: 0, transcript: [], route: null }, monitor: { status: "idle" }, loadingDetail: false };
       const $ = (id) => document.getElementById(id);
-      const ACTIVE = new Set(["initiated", "in-progress", "processing"]);
 
       function escapeHTML(value = "") {
         return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
@@ -254,6 +258,9 @@
       function formatDuration(seconds = 0) { const m = Math.floor(seconds / 60); const s = Math.floor(seconds % 60); return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`; }
       function formatClock(unix) { return unix ? new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" }).format(new Date(unix * 1000)) : "Now"; }
       function displayTitle(call) { return call.title || call.data?.requested_action || (routeOf(call) === "red" ? "Suspicious call" : "General enquiry"); }
+      function isRemoteLive(call) {
+        return isRemoteConversationLive(call, state.live.endedAt);
+      }
       let assessmentSequence = 0;
       async function assessLive() {
         if (!state.live.transcript.length) return;
@@ -294,28 +301,36 @@
           : `<span class="sidecar-tag ${monitor.disclosureGiven ? "ok" : ""}">${monitor.disclosureGiven ? "Disclosure given" : "Disclosure missing"}</span><span class="sidecar-tag ${monitor.aiMuted ? "ok" : ""}">${monitor.aiMuted ? "AI silent" : "Check AI state"}</span><span class="sidecar-tag ${active ? "ok" : ""}">${active ? "Transcript streaming" : "Transfer preserved"}</span>`;
         const transcript = monitor?.transcript || [];
         $("sidecar-lines").innerHTML = transcript.length
-          ? transcript.slice(-8).map((turn) => `<div class="sidecar-line"><b>${escapeHTML(turn.role)}</b><span>${escapeHTML(turn.text)}</span></div>`).join("")
+          ? transcript.slice(-8).map((turn) => `<div class="sidecar-line"><span class="sidecar-role">${escapeHTML(turn.role)}</span><span>${escapeHTML(turn.text)}</span></div>`).join("")
           : `<p class="empty">${degraded ? `Monitoring failed, but the human transfer remains connected. ${escapeHTML(monitor.error || "")}` : "A transferred caller and staff member will appear here without Sol joining the conversation."}</p>`;
         $("sidecar-lines").scrollTop = $("sidecar-lines").scrollHeight;
         const alerts = monitor?.alerts || [];
         const alert = alerts.find((item) => item.signals.some((signal) => signal.id === "payment_or_account_change")) || alerts.at(-1);
         $("handoff-alert").innerHTML = alert
-          ? `<div class="alert-card"><div class="alert-label">High-risk signal · ${escapeHTML(alert.signals.map((signal) => signal.label).join(", "))}</div><p class="alert-action">${escapeHTML(alert.recommendedAction)}</p><p class="alert-evidence"><strong>Evidence:</strong> “${escapeHTML(alert.evidence)}”</p></div>`
+          ? `<div class="alert-card"><div class="alert-label">High-risk signal · ${escapeHTML(alert.signals.map((signal) => signal.label).join(", "))}</div><p class="alert-action">${escapeHTML(alert.recommendedAction)}</p><p class="alert-evidence"><span>Evidence: </span>“${escapeHTML(alert.evidence)}”</p></div>`
           : `<p class="alert-empty">No post-handoff risk alert.</p>`;
       }
 
+      function humanOutcome(call) {
+        const outcome = String(call?.data?.outcome || call?.status || "");
+        if (/caller disconnected|disconnected/i.test(outcome)) return "Call ended";
+        if (/transfer/i.test(outcome)) return "Handed to staff";
+        if (/message/i.test(outcome)) return "Message taken";
+        if (/completed|complete|resolved/i.test(outcome)) return "Conversation complete";
+        return outcome || "Processing";
+      }
       function renderCalls() {
         $("history-count").textContent = `${state.conversations.length} retained`;
         $("call-list").innerHTML = state.conversations.length ? state.conversations.map((call) => {
           const route = routeOf(call);
-          const letter = route ? route[0].toUpperCase() : ACTIVE.has(call.status) ? "•" : "?";
-          const subtitle = call.data?.outcome || call.summary || `${call.messageCount} messages`;
-          return `<button class="call-row ${call.id === state.selectedId ? "selected" : ""}" data-id="${escapeHTML(call.id)}" type="button"><span class="route-block ${escapeHTML(route)}">${escapeHTML(letter)}</span><span class="call-copy"><span class="call-title">${escapeHTML(displayTitle(call))}</span><span class="call-sub">${escapeHTML(subtitle)}</span></span><span class="call-time"><b>${formatClock(call.startedAt)}</b>${formatDuration(call.duration)}</span></button>`;
+          const flag = route === "red" ? '<span class="call-flag red">Hold</span>' : route === "amber" ? '<span class="call-flag amber">Review</span>' : "";
+          const subtitle = call.data?.outcome ? humanOutcome(call) : call.summary || humanOutcome(call);
+          return `<button class="call-row ${call.id === state.selectedId ? "selected" : ""}" data-id="${escapeHTML(call.id)}" type="button"><span class="call-copy"><span class="call-title">${escapeHTML(displayTitle(call))}</span><span class="call-sub">${escapeHTML(subtitle)}</span></span>${flag}<span class="call-time"><span class="call-time-clock">${formatClock(call.startedAt)}</span>${formatDuration(call.duration)}</span></button>`;
         }).join("") : `<p class="empty" style="padding:24px">No calls yet. Start one from the demo line.</p>`;
         document.querySelectorAll(".call-row").forEach((row) => row.addEventListener("click", () => selectConversation(row.dataset.id)));
       }
       function renderLive() {
-        const remote = state.conversations.find((call) => ACTIVE.has(call.status));
+        const remote = state.conversations.find(isRemoteLive);
         const active = state.live.active || Boolean(remote);
         const transcript = state.live.transcript;
         const route = state.live.route;
@@ -323,9 +338,10 @@
         $("live-status").textContent = active ? "Connected" : "Idle";
         $("live-status").classList.toggle("idle", !active);
         $("live-caption").textContent = active ? "Sol is screening this caller now" : "Waiting for the next browser call";
-        $("live-route").textContent = route ? `${route} · provisional` : "Not classified";
-        $("live-route").className = `route-pill ${route || ""}`;
-        $("live-lines").innerHTML = transcript.length ? transcript.slice(-8).map((turn) => `<div class="line ${escapeHTML(turn.role)}"><b>${turn.role === "agent" ? "Sol" : "Caller"}</b><span>${escapeHTML(turn.message)}</span></div>`).join("") : `<p class="empty">${active ? "Connected. Waiting for speech…" : "Speech will appear here while the call is running."}</p>`;
+        const liveLabel = route === "red" ? "Hold" : route === "amber" ? "Review" : route === "green" ? "Screened" : "Not classified";
+        $("live-route").textContent = liveLabel;
+        $("live-route").className = `route-pill ${route === "green" ? "" : route || ""}`;
+        $("live-lines").innerHTML = transcript.length ? transcript.slice(-8).map((turn) => `<div class="line ${escapeHTML(turn.role)}"><span class="line-role">${turn.role === "agent" ? "Sol" : "Caller"}</span><span>${escapeHTML(turn.message)}</span></div>`).join("") : `<p class="empty">${active ? "Connected. Waiting for speech…" : "Speech will appear here while the call is running."}</p>`;
         $("live-lines").scrollTop = $("live-lines").scrollHeight;
       }
       async function selectConversation(id, quiet = false) {
@@ -339,7 +355,7 @@
           const call = await response.json();
           if (!response.ok) throw new Error(call.error || "Could not load this call");
           renderDetail(call);
-          if (ACTIVE.has(call.status) && !state.live.transcript.length) {
+          if (isRemoteLive(call) && !state.live.transcript.length) {
             state.live.active = true;
             state.live.startedAt ||= Date.now();
             state.live.transcript = call.transcript || [];
@@ -350,11 +366,17 @@
         finally { state.loadingDetail = false; }
       }
       function renderDetail(call) {
-        const route = String(call.policy?.risk_level || call.data?.route || "unclassified").toLowerCase();
-        const facts = [["Rust policy", route], ["Outcome", call.data?.outcome || call.status], ["Caller", call.data?.caller_name || "Not provided"], ["Company", call.data?.claimed_company || "Not provided"], ["Reference", call.data?.reference || "None"], ["Transfer allowed", call.policy ? (call.policy.transfer_allowed ? "Yes" : "No") : "Historical call"]];
+        const outcome = humanOutcome(call);
+        const facts = [];
+        if (outcome) facts.push(["Outcome", outcome]);
+        if (call.data?.caller_name) facts.push(["Caller", call.data.caller_name]);
+        if (call.data?.claimed_company) facts.push(["Company", call.data.claimed_company]);
+        if (call.data?.reference && call.data.reference !== "None") facts.push(["Reference", call.data.reference]);
+        if (typeof call.policy?.transfer_allowed === "boolean") facts.push(["Transfer", call.policy.transfer_allowed ? "Allowed" : "Held"]);
         const legacyLeak = (call.transcript || []).some((turn) => turn.role === "agent" && /(red tarpit|routing model|the user provided|i am still in red)/i.test(turn.message));
         $("detail-meta").textContent = `${formatClock(call.startedAt)} · ${formatDuration(call.duration)}`;
-        $("detail").innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px"><h3 class="detail-title">${escapeHTML(call.title || "Call transcript")}</h3><span class="route-pill ${escapeHTML(route)}">${escapeHTML(route)}</span></div>${legacyLeak ? `<div class="notice"><strong>Historical call:</strong> this transcript predates the spoken-output firewall. The current agent passed the no-internal-monologue regression.</div>` : ""}<p class="detail-summary">${escapeHTML(call.summary || "Analysis is still processing for this call.")}</p><div class="facts">${facts.map(([label, value]) => `<div class="fact"><small>${escapeHTML(label)}</small><strong title="${escapeHTML(value)}">${escapeHTML(value)}</strong></div>`).join("")}</div>${call.data?.risk_signals && call.data.risk_signals !== "none" ? `<div class="risk"><strong>Risk signals:</strong> ${escapeHTML(call.data.risk_signals)}</div>` : ""}<div class="transcript">${(call.transcript || []).map((turn) => `<div class="bubble ${escapeHTML(turn.role)}"><small>${turn.role === "agent" ? "Sol" : "Caller"} · ${formatDuration(turn.time)}${turn.interrupted ? " · interrupted" : ""}</small>${escapeHTML(turn.message)}</div>`).join("") || `<p class="empty">Transcript is not available yet.</p>`}</div>`;
+        const factsMarkup = facts.length ? `<details class="detail-inspector"><summary>Call details</summary><div class="facts">${facts.map(([label, value]) => `<div class="fact"><small>${escapeHTML(label)}</small><span class="fact-value" title="${escapeHTML(value)}">${escapeHTML(value)}</span></div>`).join("")}</div></details>` : "";
+        $("detail").innerHTML = `<div style="margin-bottom:8px"><h3 class="detail-title">${escapeHTML(call.title || "Call transcript")}</h3></div>${legacyLeak ? `<div class="notice">This older transcript predates the spoken-output firewall. The current agent passed the no-internal-monologue regression.</div>` : ""}<p class="detail-summary">${escapeHTML(call.summary || "Analysis is still processing for this call.")}</p>${factsMarkup}${call.data?.risk_signals && call.data.risk_signals !== "none" ? `<div class="risk"><span>Risk signals: </span>${escapeHTML(call.data.risk_signals)}</div>` : ""}<div class="transcript">${(call.transcript || []).map((turn) => `<div class="bubble ${escapeHTML(turn.role)}"><small>${turn.role === "agent" ? "Sol" : "Caller"} · ${formatDuration(turn.time)}${turn.interrupted ? " · interrupted" : ""}</small>${escapeHTML(turn.message)}</div>`).join("") || `<p class="empty">Transcript is not available yet.</p>`}</div>`;
       }
       function normalizeMessage(payload) {
         const message = payload?.message || payload?.text || payload?.user_transcript || payload?.agent_response;
@@ -363,11 +385,17 @@
         return typeof message === "string" && role ? { role, message } : null;
       }
       function startLive() {
-        if (!state.live.active) state.live = { active: true, startedAt: Date.now(), transcript: [], route: null };
+        if (!state.live.active) state.live = { active: true, startedAt: Date.now(), endedAt: 0, transcript: [], route: null };
         renderLive(); setTimeout(refreshConversations, 1200);
       }
       function stopLive() {
-        state.live.active = false; renderLive(); setTimeout(refreshConversations, 1800); setTimeout(refreshConversations, 5500);
+        if (!state.live.active && state.live.endedAt) return;
+        assessmentSequence += 1;
+        state.live.active = false;
+        state.live.endedAt = Date.now();
+        renderLive();
+        setTimeout(refreshConversations, 1800);
+        setTimeout(refreshConversations, 5500);
       }
 
       const widget = document.querySelector("elevenlabs-convai");
@@ -376,7 +404,11 @@
         if (!config) return;
         config.onConnect = startLive;
         config.onDisconnect = stopLive;
-        config.onStatusChange = ({ status } = {}) => { if (status === "connected") startLive(); if (status === "disconnected" && state.live.active) stopLive(); };
+        config.onStatusChange = ({ status } = {}) => {
+          if (status === "connected") startLive();
+          if (isEndingWidgetStatus(status)) stopLive();
+        };
+        config.onError = () => { if (state.live.active) stopLive(); };
         config.onMessage = (payload) => {
           const turn = normalizeMessage(payload);
           if (!turn) return;
@@ -420,7 +452,7 @@
           state.conversations = result.conversations || [];
           $("sync-label").textContent = `Live · updated ${new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(new Date(result.refreshedAt))}`;
           renderCalls(); renderLive();
-          const active = state.conversations.find((call) => ACTIVE.has(call.status));
+          const active = state.conversations.find(isRemoteLive);
           if (active) { state.selectedId = active.id; await selectConversation(active.id, true); }
           else if (!state.selectedId && state.conversations[0]) await selectConversation(state.conversations[0].id);
           else if (state.live.active === false && previousFirst && state.conversations[0]?.id !== previousFirst) { state.selectedId = state.conversations[0].id; await selectConversation(state.selectedId); }

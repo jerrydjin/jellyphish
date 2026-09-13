@@ -82,11 +82,18 @@ The existing monitored-handoff contract remains at `/api/webhooks/*`; see [MONIT
 cargo +stable fmt --all -- --check
 cargo +stable test --workspace
 cargo +stable clippy --workspace --all-targets -- -D warnings
+node --test tests/call-lifecycle.test.mjs
 ```
 
 The tests cover ordinary, unverified supplier, and high-risk transfer decisions; every high-risk class; HMAC validation; and the HTTP assessment contract.
 
 ## ElevenLabs setup
+
+Deploy prompt and spoken-output guardrail changes to the live agent with:
+
+```sh
+node scripts/deploy-agent-safety.mjs
+```
 
 Webhook tools call external APIs, while `transfer_to_number` and `end_call` remain ElevenLabs system tools. To attach the two policy tools to the live agent, expose this server on a public HTTPS origin and run:
 
