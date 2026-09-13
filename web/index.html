@@ -5,140 +5,148 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="Live call screening console for Studio Sol Hair." />
     <title>Studio Sol — Call Console</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231b1722'/%3E%3Cpath d='M18 40c8 9 22 8 28-3M20 25c4-7 18-9 24 0' fill='none' stroke='%23ff8066' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230b0d0f'/%3E%3Cpath d='M18 40c8 9 22 8 28-3M20 25c4-7 18-9 24 0' fill='none' stroke='%23f2b85b' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E" />
     <style>
       :root {
-        color-scheme: dark;
+        color-scheme: light;
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        --ink: #f7f4fb;
-        --muted: #9b94a6;
-        --panel: #201b28;
-        --panel-2: #17131d;
-        --border: #383141;
-        --accent: #ff8066;
-        --green: #55d58d;
-        --amber: #f0b94f;
-        --red: #ff665f;
-        --r: 18px;
+        --ink: #111111;
+        --muted: #6d6d6a;
+        --subtle: #989895;
+        --canvas: #fdfdfb;
+        --paper: #f5f5f2;
+        --panel: #ffffff;
+        --border: #deded9;
+        --border-strong: #bcbcb6;
+        --accent: #e8ff00;
+        --green: #16844c;
+        --amber: #a36b00;
+        --red: #bd3631;
       }
       * { box-sizing: border-box; }
-      body { margin: 0; min-height: 100vh; background: #110e16; color: var(--ink); font-size: 16px; }
+      html { scroll-behavior: smooth; }
+      body { margin: 0; min-height: 100vh; background: var(--canvas); color: var(--ink); font-size: 16px; }
       button { font: inherit; }
-      .app { min-height: 100vh; display: grid; grid-template-columns: 320px minmax(0, 1fr); }
-      aside { position: sticky; top: 0; height: 100vh; padding: 28px; background: var(--panel-2); border-right: 1px solid var(--border); overflow: auto; }
-      .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 42px; }
-      .brand-mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px; color: #18121d; background: var(--accent); font-weight: 900; }
-      .brand strong { display: block; letter-spacing: -.02em; }
-      .brand small { color: var(--muted); font-size: .78rem; }
-      .eyebrow { margin: 0 0 10px; color: var(--accent); font-size: .75rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-      aside h2 { margin: 0; font-size: 1.55rem; letter-spacing: -.035em; }
-      aside p { color: var(--muted); line-height: 1.55; }
-      .scenario-list { display: grid; gap: 9px; margin: 24px 0; }
-      .scenario { padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; color: #ccc5d4; background: #1d1824; font-size: .86rem; line-height: 1.4; }
-      .scenario span { display: inline-grid; width: 21px; height: 21px; margin-right: 7px; place-items: center; border-radius: 7px; color: #17131d; background: #c9c1d4; font-size: .7rem; font-weight: 800; }
-      .demo-handoff { width: 100%; margin-top: 12px; padding: 11px 13px; border: 1px solid #6f4c47; border-radius: 11px; color: #ffd9d0; background: #342126; cursor: pointer; font-weight: 700; }
-      .demo-handoff:hover, .demo-handoff:focus-visible { border-color: var(--accent); outline: none; }
-      elevenlabs-convai { display: block; margin-top: 18px; }
-      .privacy { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); color: #777080; font-size: .75rem; line-height: 1.5; }
-
-      main { min-width: 0; padding: 30px clamp(24px, 4vw, 58px) 50px; }
-      .topbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
-      h1 { margin: 0; font-size: clamp(1.8rem, 3vw, 2.65rem); letter-spacing: -.055em; }
-      .top-actions { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: .82rem; }
-      .live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 5px #55d58d1e; }
-      .refresh { padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; color: var(--ink); background: transparent; cursor: pointer; }
-      .refresh:hover, .refresh:focus-visible { border-color: #645b70; outline: none; }
-      .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
-      .metric { padding: 18px; border: 1px solid var(--border); border-radius: 15px; background: var(--panel); }
-      .metric-label { color: var(--muted); font-size: .78rem; }
-      .metric-value { display: block; margin-top: 7px; font-size: 1.8rem; font-weight: 750; letter-spacing: -.045em; }
-
-      .live-card { display: grid; grid-template-columns: minmax(230px, .75fr) minmax(0, 1.25fr); min-height: 220px; margin-bottom: 18px; border: 1px solid #59403f; border-radius: var(--r); overflow: hidden; background: linear-gradient(135deg, #2a1e25, #201b28 66%); }
-      .live-meta { padding: 24px; border-right: 1px solid #59403f; }
+      strong, b { font-weight: 400; }
+      .site-nav { position: sticky; top: 0; z-index: 10; border-top: 8px solid #161616; border-bottom: 1px solid #e9e9e5; background: rgba(255, 255, 255, .96); backdrop-filter: blur(14px); }
+      .nav-inner { min-height: 72px; display: flex; align-items: center; gap: 40px; padding: 0 34px; }
+      .nav-brand { display: flex; align-items: center; gap: 10px; min-width: 155px; }
+      .brand-mark { width: 31px; height: 31px; display: grid; place-items: center; border-radius: 9px; color: #111; background: var(--accent); font-size: .9rem; font-weight: 400; }
+      .nav-brand strong { font-size: 1.02rem; font-weight: 400; letter-spacing: -.04em; }
+      .nav-links { display: flex; align-items: center; gap: 28px; }
+      .nav-links a { color: #292929; font-size: .8rem; font-weight: 400; text-decoration: none; }
+      .nav-links a:hover, .nav-links a:focus-visible { text-decoration: underline; outline: none; }
+      .nav-actions { display: flex; align-items: center; gap: 16px; margin-left: auto; }
+      .nav-status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .72rem; white-space: nowrap; }
+      .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+      .refresh { padding: 8px 0; border: 0; color: #3d3d3a; background: transparent; cursor: pointer; font-size: .78rem; font-weight: 400; text-decoration: underline; text-underline-offset: 3px; }
+      .refresh:hover, .refresh:focus-visible { color: #111; outline: none; }
+      .app { min-height: calc(100vh - 80px); display: grid; grid-template-columns: 252px minmax(0, 1fr); }
+      aside { position: sticky; top: 80px; height: calc(100vh - 80px); display: flex; flex-direction: column; padding: 34px 20px 24px 24px; background: rgba(255, 255, 255, .88); border-right: 1px solid var(--border); overflow: auto; }
+      .demo-intro { padding: 3px 0 0; }
+      aside h2 { margin: 0; font-size: 1.48rem; font-weight: 400; letter-spacing: -.055em; }
+      aside p { color: var(--muted); line-height: 1.5; }
+      .scenario-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 27px 0 10px; color: #2c2c2b; font-size: .78rem; font-weight: 400; }
+      .scenario-head small { color: var(--subtle); font-size: .68rem; font-weight: 400; }
+      .scenario-list { display: grid; gap: 6px; margin: 0 0 14px; }
+      .scenario { display: flex; align-items: center; gap: 9px; padding: 10px 0; border-bottom: 1px solid var(--border); color: #454542; background: transparent; font-size: .78rem; line-height: 1.35; }
+      .scenario:hover { color: #111; }
+      .scenario span { flex: 0 0 auto; display: inline-grid; width: 21px; height: 21px; place-items: center; border: 1px solid #bfc0ba; border-radius: 3px; color: #555550; background: #fff; font-size: .66rem; font-weight: 400; }
+      .demo-handoff { width: 100%; margin-top: 16px; padding: 8px 0; border: 0; color: #111; background: transparent; cursor: pointer; font-size: .78rem; font-weight: 400; text-align: left; text-decoration: underline; text-underline-offset: 3px; }
+      .demo-handoff:hover, .demo-handoff:focus-visible { color: #6a7500; outline: none; }
+      elevenlabs-convai { display: block; }
+      main { min-width: 0; padding: 0 clamp(28px, 4vw, 68px) 70px; }
+      .topbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 50px 0 30px; }
+      h1 { max-width: 760px; margin: 0; font-size: clamp(2.35rem, 4vw, 4rem); font-weight: 400; line-height: .98; letter-spacing: -.065em; }
+      .live-card { position: relative; display: grid; grid-template-columns: minmax(220px, .7fr) minmax(0, 1.3fr); min-height: 246px; margin-bottom: 18px; border: 1px solid #cfcfca; border-radius: 0; overflow: hidden; background: rgba(255, 255, 255, .96); }
+      .live-meta { padding: 26px; border-right: 1px solid var(--border); }
       .live-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-      .live-heading h2 { margin: 0; font-size: 1.15rem; }
-      .status-pill, .route-pill { display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border-radius: 999px; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
-      .status-pill { color: #b8f5d0; background: #163826; }
-      .status-pill.idle { color: #aaa2b3; background: #302a38; }
-      .live-time { margin: 24px 0 3px; font-variant-numeric: tabular-nums; font-size: 2.5rem; font-weight: 760; letter-spacing: -.06em; }
-      .live-caption { color: var(--muted); font-size: .82rem; }
-      .wave { height: 32px; display: flex; align-items: center; gap: 4px; margin-top: 26px; }
-      .wave i { width: 4px; height: 7px; border-radius: 9px; background: var(--accent); opacity: .45; }
+      .live-heading h2 { margin: 0; font-size: 1rem; font-weight: 400; letter-spacing: -.025em; }
+      .status-pill, .route-pill { display: inline-flex; align-items: center; gap: 7px; padding: 0; border: 0; border-radius: 0; font-size: .72rem; font-weight: 400; letter-spacing: 0; }
+      .status-pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+      .status-pill { color: var(--green); background: transparent; }
+      .status-pill.idle { color: #777773; background: transparent; }
+      .live-time { margin: 28px 0 3px; font-variant-numeric: tabular-nums; font-size: 2.9rem; font-weight: 400; letter-spacing: -.085em; }
+      .live-caption { color: var(--muted); font-size: .8rem; }
+      .wave { height: 32px; display: flex; align-items: center; gap: 4px; margin-top: 27px; }
+      .wave i { width: 3px; height: 6px; border-radius: 9px; background: #111; opacity: .3; }
       .live-card.active .wave i { animation: wave .85s ease-in-out infinite alternate; }
       .wave i:nth-child(2n) { animation-delay: -.3s; }
       .wave i:nth-child(3n) { animation-delay: -.55s; }
-      @keyframes wave { to { height: 28px; opacity: 1; } }
-      .live-transcript { min-width: 0; padding: 24px; }
+      @keyframes wave { to { height: 27px; opacity: 1; background: var(--accent); } }
+      .live-transcript { min-width: 0; padding: 26px; }
       .live-transcript-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
-      .live-transcript-head strong { font-size: .86rem; }
-      .route-pill { color: #b9b1c2; background: #332d3a; }
-      .route-pill.green { color: #aef0c9; background: #183a29; }
-      .route-pill.amber { color: #ffd989; background: #44341a; }
-      .route-pill.red { color: #ffb0aa; background: #4a2325; }
-      .live-lines { height: 132px; overflow: auto; display: grid; align-content: start; gap: 11px; }
-      .empty { margin: auto 0; color: #766f7e; font-size: .9rem; line-height: 1.55; }
-      .line { display: grid; grid-template-columns: 52px 1fr; gap: 10px; color: #ddd7e4; font-size: .88rem; line-height: 1.45; }
-      .line b { color: var(--muted); font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; }
-      .line.agent b { color: var(--accent); }
+      .live-transcript-head strong { color: #333330; font-size: .79rem; }
+      .route-pill { color: #666662; background: transparent; }
+      .route-pill.green { color: var(--green); background: transparent; }
+      .route-pill.amber { color: var(--amber); background: transparent; }
+      .route-pill.red { color: var(--red); background: transparent; }
+      .live-lines { height: 151px; overflow: auto; display: grid; align-content: start; gap: 12px; }
+      .empty { margin: auto 0; color: var(--subtle); font-size: .84rem; line-height: 1.55; }
+      .line { display: grid; grid-template-columns: 52px 1fr; gap: 10px; color: #333330; font-size: .84rem; line-height: 1.5; }
+      .line b { color: #8b8b87; font-size: .66rem; letter-spacing: 0; }
+      .line.agent b { color: #6a7500; }
 
-      .monitor-card { margin-bottom: 18px; border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; background: var(--panel); }
-      .monitor-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+      .monitor-card { margin-bottom: 18px; border: 1px solid var(--border); border-radius: 0; overflow: hidden; background: rgba(255, 255, 255, .94); }
+      .monitor-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 17px 20px; border-bottom: 1px solid var(--border); }
       .monitor-title { display: flex; align-items: center; gap: 10px; }
-      .monitor-title h2 { margin: 0; font-size: 1rem; }
-      .monitor-title span { color: var(--muted); font-size: .78rem; }
-      .monitor-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, .9fr); min-height: 180px; }
+      .monitor-title h2 { margin: 0; font-size: .92rem; font-weight: 400; }
+      .monitor-title span { color: var(--muted); font-size: .74rem; }
+      .monitor-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, .9fr); min-height: 182px; }
       .sidecar { padding: 18px 20px; border-right: 1px solid var(--border); }
-      .sidecar-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
-      .sidecar-tag { padding: 5px 8px; border-radius: 7px; color: #aaa3b1; background: #302a37; font-size: .7rem; font-weight: 700; }
-      .sidecar-tag.ok { color: #b3efca; background: #183527; }
+      .sidecar-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+      .sidecar-tag { padding: 0; border: 0; color: #686864; background: transparent; font-size: .72rem; font-weight: 400; }
+      .sidecar-tag.ok { color: var(--green); background: transparent; }
       .sidecar-lines { max-height: 150px; overflow: auto; display: grid; gap: 8px; }
-      .sidecar-line { display: grid; grid-template-columns: 50px 1fr; gap: 9px; color: #d9d3df; font-size: .82rem; line-height: 1.45; }
-      .sidecar-line b { color: var(--muted); font-size: .68rem; text-transform: uppercase; }
-      .alerts { padding: 18px 20px; }
-      .alert-empty { color: #7f7788; font-size: .85rem; line-height: 1.55; }
-      .alert-card { padding: 15px; border: 1px solid #7d3938; border-radius: 13px; background: #3b2023; box-shadow: 0 0 0 1px #ff665f12; }
-      .alert-label { margin-bottom: 8px; color: #ffaaa4; font-size: .7rem; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; }
-      .alert-action { margin: 0 0 10px; color: #fff1ef; font-size: 1rem; font-weight: 760; line-height: 1.4; }
-      .alert-evidence { margin: 0; color: #d7b9ba; font-size: .78rem; line-height: 1.45; }
+      .sidecar-line { display: grid; grid-template-columns: 50px 1fr; gap: 9px; color: #454542; font-size: .78rem; line-height: 1.45; }
+      .sidecar-line b { color: var(--muted); font-size: .68rem; }
+      .alerts { padding: 18px 20px; background: #fbfbf9; }
+      .alert-empty { color: var(--subtle); font-size: .79rem; line-height: 1.55; }
+      .alert-card { padding: 15px; border: 1px solid #e0b3af; border-radius: 4px; background: #fff7f6; }
+      .alert-label { margin-bottom: 7px; color: var(--red); font-size: .72rem; font-weight: 400; letter-spacing: 0; }
+      .alert-action { margin: 0 0 9px; color: #391916; font-size: .92rem; font-weight: 400; line-height: 1.4; }
+      .alert-evidence { margin: 0; color: #875653; font-size: .73rem; line-height: 1.45; }
 
-      .workspace { display: grid; grid-template-columns: minmax(360px, .9fr) minmax(380px, 1.1fr); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; background: var(--panel); }
+      .workspace { display: grid; grid-template-columns: minmax(340px, .88fr) minmax(380px, 1.12fr); border: 1px solid var(--border); border-radius: 0; overflow: hidden; background: rgba(255, 255, 255, .96); }
       .calls { min-width: 0; border-right: 1px solid var(--border); }
-      .section-head { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--border); }
-      .section-head h2 { margin: 0; font-size: 1rem; }
-      .section-head span { color: var(--muted); font-size: .76rem; }
+      .section-head { min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 17px 20px; border-bottom: 1px solid var(--border); }
+      .section-head h2 { margin: 0; font-size: .92rem; font-weight: 400; }
+      .section-head span { color: var(--muted); font-size: .71rem; }
       .call-list { max-height: 630px; overflow: auto; }
-      .call-row { width: 100%; display: grid; grid-template-columns: 46px 1fr auto; gap: 12px; align-items: center; padding: 16px 18px; border: 0; border-bottom: 1px solid #312b38; color: inherit; background: transparent; text-align: left; cursor: pointer; }
-      .call-row:hover, .call-row:focus-visible, .call-row.selected { background: #2a2431; outline: none; }
-      .route-block { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; background: #312b39; color: #aaa2b2; font-weight: 850; }
-      .route-block.green { color: var(--green); background: #193629; }
-      .route-block.amber { color: var(--amber); background: #3f321c; }
-      .route-block.red { color: var(--red); background: #442326; }
+      .call-row { width: 100%; display: grid; grid-template-columns: 38px 1fr auto; gap: 11px; align-items: center; padding: 14px 16px; border: 0; border-bottom: 1px solid #ededeb; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+      .call-row:hover, .call-row:focus-visible, .call-row.selected { background: #f8f8f5; outline: none; }
+      .call-row.selected { box-shadow: inset 3px 0 0 var(--accent); }
+      .route-block { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 0; background: transparent; color: #777773; font-size: .78rem; font-weight: 400; }
+      .route-block.green { color: var(--green); background: transparent; }
+      .route-block.amber { color: var(--amber); background: transparent; }
+      .route-block.red { color: var(--red); background: transparent; }
       .call-copy { min-width: 0; }
-      .call-title { display: block; overflow: hidden; color: #ece7f1; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-      .call-sub { display: block; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
-      .call-time { color: #8e8797; font-size: .75rem; text-align: right; white-space: nowrap; }
-      .call-time b { display: block; margin-bottom: 4px; color: #c7c0ce; font-weight: 600; }
+      .call-title { display: block; overflow: hidden; color: #222220; font-size: .83rem; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+      .call-sub { display: block; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: .71rem; text-overflow: ellipsis; white-space: nowrap; }
+      .call-time { color: var(--subtle); font-size: .69rem; text-align: right; white-space: nowrap; }
+      .call-time b { display: block; margin-bottom: 4px; color: #70706c; font-weight: 400; }
       .detail { min-width: 0; }
       .detail-scroll { max-height: 630px; overflow: auto; padding: 22px; }
-      .detail-title { margin: 0 0 6px; font-size: 1.25rem; letter-spacing: -.03em; }
-      .detail-summary { margin: 0 0 20px; color: var(--muted); line-height: 1.55; }
-      .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 22px; }
-      .fact { min-width: 0; padding: 12px; border: 1px solid #37303f; border-radius: 12px; background: #1a161f; }
-      .fact small { display: block; margin-bottom: 5px; color: #837b8c; font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; }
-      .fact strong { display: block; overflow: hidden; font-size: .86rem; text-overflow: ellipsis; white-space: nowrap; }
-      .risk { margin-bottom: 22px; padding: 14px; border-left: 3px solid var(--red); border-radius: 4px 12px 12px 4px; background: #311e24; color: #eacbce; font-size: .85rem; line-height: 1.5; }
-      .notice { margin-bottom: 16px; padding: 12px 14px; border: 1px solid #695128; border-radius: 11px; background: #332919; color: #f0d69e; font-size: .8rem; line-height: 1.5; }
-      .transcript { display: grid; gap: 12px; }
-      .bubble { max-width: 88%; padding: 11px 13px; border-radius: 14px 14px 14px 4px; background: #302938; color: #ded8e5; font-size: .86rem; line-height: 1.5; }
-      .bubble.agent { justify-self: end; border-radius: 14px 14px 4px 14px; background: #3a272d; }
-      .bubble small { display: block; margin-bottom: 4px; color: #8e8697; font-size: .68rem; text-transform: uppercase; }
-      .bubble.agent small { color: #f09b87; }
-      .error { padding: 30px; color: #ffaaa5; line-height: 1.5; }
+      .detail-title { margin: 0 0 6px; font-size: 1.14rem; letter-spacing: -.045em; }
+      .detail-summary { margin: 0 0 20px; color: var(--muted); font-size: .83rem; line-height: 1.55; }
+      .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-bottom: 21px; }
+      .fact { min-width: 0; padding: 11px; border: 1px solid var(--border); border-radius: 0; background: #fbfbf9; }
+      .fact small { display: block; margin-bottom: 5px; color: var(--subtle); font-size: .7rem; letter-spacing: 0; }
+      .fact strong { display: block; overflow: hidden; color: #333330; font-size: .77rem; text-overflow: ellipsis; white-space: nowrap; }
+      .risk { margin-bottom: 20px; padding: 13px 14px; border-left: 3px solid var(--red); border-radius: 0; background: #fff7f6; color: #713a36; font-size: .79rem; line-height: 1.5; }
+      .notice { margin-bottom: 16px; padding: 12px 14px; border: 1px solid #e4d19c; border-radius: 0; background: #fffaf0; color: #785a17; font-size: .75rem; line-height: 1.5; }
+      .transcript { display: grid; gap: 10px; }
+      .bubble { max-width: 88%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 4px; background: #f8f8f5; color: #3b3b38; font-size: .79rem; line-height: 1.5; }
+      .bubble.agent { justify-self: end; border-color: #d7df84; border-radius: 4px; background: #fbffe1; }
+      .bubble small { display: block; margin-bottom: 4px; color: var(--subtle); font-size: .68rem; }
+      .bubble.agent small { color: #6a7500; }
+      .error { padding: 30px; color: var(--red); line-height: 1.5; }
 
-      @media (max-width: 1050px) {
-        .app { grid-template-columns: 270px minmax(0, 1fr); }
-        aside { padding: 22px; }
-        .metrics { grid-template-columns: repeat(2, 1fr); }
+      @media (max-width: 1100px) {
+        .nav-inner { gap: 22px; padding: 0 22px; }
+        .nav-links { gap: 16px; }
+        .app { grid-template-columns: 220px minmax(0, 1fr); }
+        aside { padding: 30px 16px 22px 20px; }
         .workspace { grid-template-columns: 1fr; }
         .calls { border-right: 0; border-bottom: 1px solid var(--border); }
         .call-list, .detail-scroll { max-height: 460px; }
@@ -146,46 +154,56 @@
         .sidecar { border-right: 0; border-bottom: 1px solid var(--border); }
       }
       @media (max-width: 760px) {
+        .site-nav { position: static; }
+        .nav-inner { min-height: 64px; flex-wrap: wrap; gap: 14px; padding: 12px 16px; }
+        .nav-brand { min-width: 0; }
+        .nav-links { order: 3; width: 100%; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+        .nav-links a { font-size: .72rem; }
+        .nav-actions { margin-left: auto; }
+        .nav-status { display: none; }
         .app { display: block; }
         aside { position: static; width: auto; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
-        .brand { margin-bottom: 28px; }
-        main { padding: 24px 16px 40px; }
-        .topbar { align-items: flex-start; }
-        .top-actions > span:not(.live-dot) { display: none; }
+        main { padding: 0 16px 40px; }
+        .topbar { align-items: flex-start; flex-direction: column; gap: 17px; padding: 48px 0 28px; }
+        h1 { font-size: clamp(2.7rem, 13vw, 4rem); }
         .live-card { grid-template-columns: 1fr; }
-        .live-meta { border-right: 0; border-bottom: 1px solid #59403f; }
+        .live-meta { border-right: 0; border-bottom: 1px solid var(--border); }
         .workspace { grid-template-columns: 1fr; }
       }
     </style>
   </head>
   <body>
+    <header class="site-nav">
+      <div class="nav-inner">
+        <div class="nav-brand"><div class="brand-mark">S</div><div><strong>Studio Sol</strong></div></div>
+        <nav class="nav-links" aria-label="Primary navigation">
+          <a href="#overview">Overview</a>
+          <a href="#live-card">Live calls</a>
+          <a href="#monitor-title">Handoffs</a>
+          <a href="#workspace">Call history</a>
+        </nav>
+        <div class="nav-actions"><span class="nav-status"><span class="live-dot"></span><span id="sync-label">Connecting to ElevenLabs</span></span><button class="refresh" id="refresh" type="button">Refresh</button></div>
+      </div>
+    </header>
     <div class="app">
       <aside>
-        <div class="brand"><div class="brand-mark">S</div><div><strong>Studio Sol</strong><small>Call protection console</small></div></div>
-        <p class="eyebrow">Demo line</p>
-        <h2>Test the front desk</h2>
-        <p>Start a browser call. The owner console updates during the conversation and saves ElevenLabs’ final result.</p>
+        <div class="demo-intro">
+          <h2>Talk to Sol.</h2>
+        </div>
+        <div class="scenario-head"><span>Try a scenario</span></div>
         <div class="scenario-list">
           <div class="scenario"><span>1</span>Ask for a haircut tomorrow.</div>
           <div class="scenario"><span>2</span>Call about a delivery.</div>
           <div class="scenario"><span>3</span>Demand remote POS access.</div>
         </div>
-        <button class="demo-handoff" id="handoff-demo" type="button">Run monitored-handoff demo</button>
-        <elevenlabs-convai agent-id="agent_1101m2b4acdnedz9y2yky3w9vwfm" variant="expanded" action-text="Talk to Sol" start-call-text="Start demo call" end-call-text="End call" listening-text="Caller speaking…" speaking-text="Sol speaking…" avatar-orb-color-1="#ff8066" avatar-orb-color-2="#6c3454"></elevenlabs-convai>
-        <div class="privacy">Demo recordings and transcripts are retained by ElevenLabs for seven days. The API key stays on this local server.</div>
+        <button class="demo-handoff" id="handoff-demo" type="button">Run monitored handoff</button>
+        <elevenlabs-convai agent-id="agent_1101m2b4acdnedz9y2yky3w9vwfm" variant="expanded" action-text="Talk to Sol" start-call-text="Start demo call" end-call-text="End call" listening-text="Caller speaking…" speaking-text="Sol speaking…" avatar-orb-color-1="#f2b85b" avatar-orb-color-2="#302615"></elevenlabs-convai>
       </aside>
 
       <main>
-        <header class="topbar">
-          <div><p class="eyebrow">Owner overview</p><h1>Calls, as they happen.</h1></div>
-          <div class="top-actions"><span class="live-dot"></span><span id="sync-label">Connecting to ElevenLabs</span><button class="refresh" id="refresh" type="button">Refresh</button></div>
+        <header class="topbar" id="overview">
+          <div><h1>Good afternoon, Studio Sol.</h1></div>
         </header>
-        <section class="metrics" aria-label="Call metrics">
-          <div class="metric"><span class="metric-label">Active now</span><strong class="metric-value" id="metric-active">—</strong></div>
-          <div class="metric"><span class="metric-label">Calls today</span><strong class="metric-value" id="metric-calls">—</strong></div>
-          <div class="metric"><span class="metric-label">Red calls held</span><strong class="metric-value" id="metric-red">—</strong></div>
-          <div class="metric"><span class="metric-label">Distraction turns</span><strong class="metric-value" id="metric-turns">—</strong></div>
-        </section>
         <section class="live-card" id="live-card" aria-labelledby="live-title">
           <div class="live-meta">
             <div class="live-heading"><h2 id="live-title">Live call</h2><span class="status-pill idle" id="live-status">Idle</span></div>
@@ -211,7 +229,7 @@
             <div class="alerts" id="handoff-alert" aria-live="assertive"><p class="alert-empty">No post-handoff risk alert.</p></div>
           </div>
         </section>
-        <section class="workspace" aria-label="Call history">
+        <section class="workspace" id="workspace" aria-label="Call history">
           <div class="calls">
             <div class="section-head"><h2>Recent calls</h2><span id="history-count">Loading…</span></div>
             <div class="call-list" id="call-list"></div>
@@ -232,16 +250,37 @@
       function escapeHTML(value = "") {
         return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
       }
-      function routeOf(call) { return String(call?.data?.route || "").toLowerCase(); }
+      function routeOf(call) { return String(call?.policy?.risk_level || call?.data?.route || "").toLowerCase(); }
       function formatDuration(seconds = 0) { const m = Math.floor(seconds / 60); const s = Math.floor(seconds % 60); return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`; }
       function formatClock(unix) { return unix ? new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" }).format(new Date(unix * 1000)) : "Now"; }
-      function isToday(unix) { if (!unix) return false; const d = new Date(unix * 1000), n = new Date(); return d.toDateString() === n.toDateString(); }
       function displayTitle(call) { return call.title || call.data?.requested_action || (routeOf(call) === "red" ? "Suspicious call" : "General enquiry"); }
-      function inferRoute(transcript) {
-        const text = transcript.map((turn) => turn.message).join(" ").toLowerCase();
-        if (/remote\s*(access|support)|password|mfa|verification code|refund|payment change|account access|compromised|install/.test(text)) return "red";
-        if (/delivery|supplier|purchase order|staff (schedule|available)|duty manager/.test(text)) return "amber";
-        return transcript.length ? "green" : null;
+      let assessmentSequence = 0;
+      async function assessLive() {
+        if (!state.live.transcript.length) return;
+        const sequence = ++assessmentSequence;
+        const callerTurns = state.live.transcript.filter((turn) => turn.role === "user");
+        const text = callerTurns.map((turn) => turn.message).join(" ");
+        try {
+          const response = await fetch("/tool/assess", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              call_id: `browser_${state.live.startedAt || Date.now()}`,
+              requested_action: text,
+              transcript: callerTurns,
+            }),
+          });
+          const decision = await response.json();
+          if (!response.ok) throw new Error(decision.error || "Policy service unavailable");
+          if (sequence !== assessmentSequence) return;
+          state.live.route = decision.risk_level;
+          renderLive();
+        } catch {
+          if (sequence === assessmentSequence) {
+            state.live.route = null;
+            $("live-route").textContent = "Policy unavailable · no transfer";
+          }
+        }
       }
       function renderMonitor(monitor = state.monitor) {
         const idle = !monitor?.sessionId;
@@ -258,19 +297,13 @@
           ? transcript.slice(-8).map((turn) => `<div class="sidecar-line"><b>${escapeHTML(turn.role)}</b><span>${escapeHTML(turn.text)}</span></div>`).join("")
           : `<p class="empty">${degraded ? `Monitoring failed, but the human transfer remains connected. ${escapeHTML(monitor.error || "")}` : "A transferred caller and staff member will appear here without Sol joining the conversation."}</p>`;
         $("sidecar-lines").scrollTop = $("sidecar-lines").scrollHeight;
-        const alert = (monitor?.alerts || []).at(-1);
+        const alerts = monitor?.alerts || [];
+        const alert = alerts.find((item) => item.signals.some((signal) => signal.id === "payment_or_account_change")) || alerts.at(-1);
         $("handoff-alert").innerHTML = alert
           ? `<div class="alert-card"><div class="alert-label">High-risk signal · ${escapeHTML(alert.signals.map((signal) => signal.label).join(", "))}</div><p class="alert-action">${escapeHTML(alert.recommendedAction)}</p><p class="alert-evidence"><strong>Evidence:</strong> “${escapeHTML(alert.evidence)}”</p></div>`
           : `<p class="alert-empty">No post-handoff risk alert.</p>`;
       }
 
-      function renderMetrics() {
-        const today = state.conversations.filter((call) => isToday(call.startedAt));
-        $("metric-active").textContent = state.live.active || state.conversations.some((call) => ACTIVE.has(call.status)) ? "1" : "0";
-        $("metric-calls").textContent = today.length;
-        $("metric-red").textContent = today.filter((call) => routeOf(call) === "red").length;
-        $("metric-turns").textContent = today.reduce((sum, call) => sum + Number(call.data?.distraction_turns || 0), 0);
-      }
       function renderCalls() {
         $("history-count").textContent = `${state.conversations.length} retained`;
         $("call-list").innerHTML = state.conversations.length ? state.conversations.map((call) => {
@@ -285,7 +318,7 @@
         const remote = state.conversations.find((call) => ACTIVE.has(call.status));
         const active = state.live.active || Boolean(remote);
         const transcript = state.live.transcript;
-        const route = state.live.route || inferRoute(transcript) || routeOf(remote);
+        const route = state.live.route;
         $("live-card").classList.toggle("active", active);
         $("live-status").textContent = active ? "Connected" : "Idle";
         $("live-status").classList.toggle("idle", !active);
@@ -310,15 +343,15 @@
             state.live.active = true;
             state.live.startedAt ||= Date.now();
             state.live.transcript = call.transcript || [];
-            state.live.route = call.data?.route || inferRoute(state.live.transcript);
-            renderLive();
+            state.live.route = call.policy?.risk_level || null;
+            renderLive(); assessLive();
           }
         } catch (error) { $("detail").innerHTML = `<div class="error">${escapeHTML(error.message)}</div>`; }
         finally { state.loadingDetail = false; }
       }
       function renderDetail(call) {
-        const route = String(call.data?.route || "unclassified").toLowerCase();
-        const facts = [["Route", route], ["Outcome", call.data?.outcome || call.status], ["Caller", call.data?.caller_name || "Not provided"], ["Company", call.data?.claimed_company || "Not provided"], ["Reference", call.data?.reference || "None"], ["Distraction", `${call.data?.distraction_turns || 0} turns`]];
+        const route = String(call.policy?.risk_level || call.data?.route || "unclassified").toLowerCase();
+        const facts = [["Rust policy", route], ["Outcome", call.data?.outcome || call.status], ["Caller", call.data?.caller_name || "Not provided"], ["Company", call.data?.claimed_company || "Not provided"], ["Reference", call.data?.reference || "None"], ["Transfer allowed", call.policy ? (call.policy.transfer_allowed ? "Yes" : "No") : "Historical call"]];
         const legacyLeak = (call.transcript || []).some((turn) => turn.role === "agent" && /(red tarpit|routing model|the user provided|i am still in red)/i.test(turn.message));
         $("detail-meta").textContent = `${formatClock(call.startedAt)} · ${formatDuration(call.duration)}`;
         $("detail").innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px"><h3 class="detail-title">${escapeHTML(call.title || "Call transcript")}</h3><span class="route-pill ${escapeHTML(route)}">${escapeHTML(route)}</span></div>${legacyLeak ? `<div class="notice"><strong>Historical call:</strong> this transcript predates the spoken-output firewall. The current agent passed the no-internal-monologue regression.</div>` : ""}<p class="detail-summary">${escapeHTML(call.summary || "Analysis is still processing for this call.")}</p><div class="facts">${facts.map(([label, value]) => `<div class="fact"><small>${escapeHTML(label)}</small><strong title="${escapeHTML(value)}">${escapeHTML(value)}</strong></div>`).join("")}</div>${call.data?.risk_signals && call.data.risk_signals !== "none" ? `<div class="risk"><strong>Risk signals:</strong> ${escapeHTML(call.data.risk_signals)}</div>` : ""}<div class="transcript">${(call.transcript || []).map((turn) => `<div class="bubble ${escapeHTML(turn.role)}"><small>${turn.role === "agent" ? "Sol" : "Caller"} · ${formatDuration(turn.time)}${turn.interrupted ? " · interrupted" : ""}</small>${escapeHTML(turn.message)}</div>`).join("") || `<p class="empty">Transcript is not available yet.</p>`}</div>`;
@@ -331,10 +364,10 @@
       }
       function startLive() {
         if (!state.live.active) state.live = { active: true, startedAt: Date.now(), transcript: [], route: null };
-        renderMetrics(); renderLive(); setTimeout(refreshConversations, 1200);
+        renderLive(); setTimeout(refreshConversations, 1200);
       }
       function stopLive() {
-        state.live.active = false; renderMetrics(); renderLive(); setTimeout(refreshConversations, 1800); setTimeout(refreshConversations, 5500);
+        state.live.active = false; renderLive(); setTimeout(refreshConversations, 1800); setTimeout(refreshConversations, 5500);
       }
 
       const widget = document.querySelector("elevenlabs-convai");
@@ -349,7 +382,7 @@
           if (!turn) return;
           const previous = state.live.transcript.at(-1);
           if (previous?.role === turn.role && previous.message === turn.message) return;
-          state.live.transcript.push(turn); state.live.route = inferRoute(state.live.transcript); renderLive();
+          state.live.transcript.push(turn); renderLive(); assessLive();
         };
       });
       const monitorEvents = new EventSource("/api/monitor/events");
@@ -375,7 +408,7 @@
         } catch (error) {
           $("monitor-subtitle").textContent = error.message;
         } finally {
-          setTimeout(() => { button.disabled = false; button.textContent = "Run monitored-handoff demo"; }, 1600);
+          setTimeout(() => { button.disabled = false; button.textContent = "Run monitored handoff"; }, 1600);
         }
       });
       async function refreshConversations() {
@@ -386,14 +419,14 @@
           const previousFirst = state.conversations[0]?.id;
           state.conversations = result.conversations || [];
           $("sync-label").textContent = `Live · updated ${new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(new Date(result.refreshedAt))}`;
-          renderMetrics(); renderCalls(); renderLive();
+          renderCalls(); renderLive();
           const active = state.conversations.find((call) => ACTIVE.has(call.status));
           if (active) { state.selectedId = active.id; await selectConversation(active.id, true); }
           else if (!state.selectedId && state.conversations[0]) await selectConversation(state.conversations[0].id);
           else if (state.live.active === false && previousFirst && state.conversations[0]?.id !== previousFirst) { state.selectedId = state.conversations[0].id; await selectConversation(state.selectedId); }
         } catch (error) {
           $("sync-label").textContent = "ElevenLabs unavailable";
-          if (!state.conversations.length) $("call-list").innerHTML = `<div class="error">${escapeHTML(error.message)}. Start this page with node server.mjs.</div>`;
+          if (!state.conversations.length) $("call-list").innerHTML = `<div class="error">${escapeHTML(error.message)}. Start this page with cargo +stable run -p jellyphish-server.</div>`;
         }
       }
       setInterval(() => {

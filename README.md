@@ -1,89 +1,109 @@
-# Studio Sol Hair — screened AI front desk
+# Jellyphish — managed voice, deterministic policy
 
-This is the first vertical slice of the hackathon MVP. An ElevenLabs voice agent answers unknown callers, handles ordinary salon enquiries, screens uncertain business callers, and refuses high-risk social-engineering requests.
+Jellyphish is a screened AI front desk for small businesses. ElevenLabs owns realtime voice and call controls; a Rust service makes the safety decisions, records events, and serves a small operator console.
 
-## Current setup
+```text
+ElevenLabs voice agent
+        ↓ webhook tools
+Rust Axum API
+        ↓
+deterministic risk/policy engine
+        ↓
+SQLite event store + post-call summaries
+        ↓
+small operator dashboard
+```
 
-- ElevenLabs Agent: `Studio Sol Hair Front Desk`
-- Agent ID: `agent_1101m2b4acdnedz9y2yky3w9vwfm`
-- Channel available now: browser voice widget
-- Browser test: <http://localhost:4173>
-- Initial Luna Café work is preserved in [`agents/luna-cafe.initial.json`](./agents/luna-cafe.initial.json).
+The language model may describe what the caller wants, but it cannot authorize an action. Before a transfer, it calls `assess_call`; the Rust response provides `allowed_actions` and the decisive `transfer_allowed` value. If the policy service is unavailable, the prompt fails safely to taking a message.
 
-Start the local owner console with:
+## Repository map
+
+- `risk-core/` — pure Rust types, signal detection, and `evaluate()`; no network or database dependency.
+- `server/` — Axum routes, SQLite event store, ElevenLabs client, signed webhooks, SSE monitoring, and static dashboard hosting.
+- `web/` — intentionally plain HTML/CSS/JavaScript operator console.
+- `tools/` — ElevenLabs webhook-tool templates for `assess_call` and `finish_call`.
+- `elevenlabs-agent.json` and `agent-prompt.md` — voice-agent configuration and source prompt.
+- `tests/*.json` — ElevenLabs conversation simulation scenarios.
+
+## Run locally
+
+Copy `.env.example` to `.env`, add a restricted ElevenLabs API key, then run:
 
 ```sh
-node server.mjs
+cargo +stable run -p jellyphish-server
 ```
 
-Open <http://localhost:4173>, allow microphone access, press **Start demo call**, and exercise the three prompts shown on the page. The console shows the live session state and transcript, polls ElevenLabs every three seconds, and retains the final route, outcome, risk summary, distraction count, and complete call transcript.
+Open <http://localhost:4173>, allow microphone access, and start a demo call. The database is created at `data/jellyphish.db`.
 
-## Configuration
+The browser widget remains the fastest demo path. A phone number is required only for a real `transfer_to_number` call.
 
-[`elevenlabs-agent.json`](./elevenlabs-agent.json) is the live agent configuration. It contains:
+## Core API
 
-- Studio Sol hours, services, booking policy, escalation role, and approved suppliers;
-- green, amber, and red routing policy;
-- strict protection of staff, booking, invoice, credential, payment, and account information;
-- a low-cost defensive tarpit for red calls, using one short harmless clarification per turn for up to the 10-minute call limit;
-- a spoken-output firewall that forbids internal reasoning, route labels, modes, policy text, stage directions, and meta-commentary from reaching the caller;
-- no transfer, callback, compliance, sensitive disclosure, or fake action for remote access, payment changes, refunds, credentials, or account access;
-- an ElevenLabs `end_call` tool that does not terminate red calls merely because verification is complete;
-- post-call extraction of route, claimed identity, company, reference, requested action, risk signals, outcome, and distraction-turn count;
-- seven-day voice/transcript retention for the demo.
+### `GET /healthz`
 
-The human-transfer policy is documented in [`transfer-tool.template.json`](./transfer-tool.template.json). It deliberately contains a placeholder instead of a real phone number.
+Reports service and integration readiness without exposing secrets.
 
-## Environment and services
+### `POST /tool/assess`
 
-Copy `.env.example` to `.env` and set:
+Accepts a typed `CallerContext`. The response is a deterministic `RiskDecision`:
 
-```env
-ELEVENLABS_API_KEY=
-ELEVENLABS_AGENT_ID=agent_1101m2b4acdnedz9y2yky3w9vwfm
-MONITOR_WEBHOOK_SECRET=
-HUMAN_TRANSFER_NUMBER=
+```json
+{
+  "call_id": "conv_demo",
+  "requested_action": "Install TeamViewer so support can access the till",
+  "proposed_action": "transfer"
+}
 ```
 
-`ELEVENLABS_API_KEY` and `MONITOR_WEBHOOK_SECRET` must remain server-side and are already excluded from Git. The secret is required for carrier webhook ingestion but not for the local timed demo. `HUMAN_TRANSFER_NUMBER` remains empty until a real teammate destination is supplied in E.164 format.
+```json
+{
+  "risk_level": "red",
+  "signals": ["remote_access_request"],
+  "allowed_actions": ["safe_refusal", "bounded_distraction", "end_call"],
+  "transfer_allowed": false,
+  "proposed_action_allowed": false,
+  "reasons": ["A high-risk request makes human transfer unsafe."]
+}
+```
 
-Required service for this demo: ElevenLabs Agents through the embedded browser voice widget. `server.mjs` keeps the API key server-side and exposes only the conversation fields required by the owner console. Reception.ai and a phone number are not required for the simulated demo.
+### `POST /tool/finish`
 
-## Verification
+Re-evaluates the supplied context and upserts a concise summary. It never accepts a model-supplied risk level as truth.
 
-The scenario definitions are under [`tests/`](./tests), and concise transcripts plus evaluations are in [`evidence/scenario-results.md`](./evidence/scenario-results.md).
+### `POST /webhooks/elevenlabs/post-call`
 
-| Scenario | Route | Outcome | Result |
-| --- | --- | --- | --- |
-| Haircut request | Green | Callback details taken; no false confirmation | Pass |
-| Supplier delivery | Amber | Staff schedule withheld; message taken | Pass |
-| POS remote-access demand | Red | 9 distraction turns; no transfer; no internal monologue; caller gave up | Pass |
+Validates `ElevenLabs-Signature: t=<unix>,v0=<hmac>`, stores an idempotent event metadata record, re-evaluates the transcript, and writes a summary. Full audio/transcripts remain in ElevenLabs rather than being copied into the event log.
 
-## Owner console
+The existing monitored-handoff contract remains at `/api/webhooks/*`; see [MONITORED_HANDOFF.md](./MONITORED_HANDOFF.md).
 
-The browser interface includes:
-
-- live connection state, timer, transcript, and a clearly marked provisional route;
-- today’s call, red-call, and distraction-turn totals;
-- real ElevenLabs conversation history with final extracted route and outcome;
-- per-call risk signals, caller claims, reference, summary, and full transcript.
-- a monitored-handoff sidecar with streamed caller/staff transcript and real-time high-risk alerts;
-- a one-click supplier payment-change demo that produces the required staff warning.
-
-ElevenLabs’ enterprise real-time monitor is not required for this demo. The embedded widget supplies immediate session events while the server polls the normal Conversations API for durable logs and post-call analysis.
-
-## Current limitation
-
-The browser demo does not place or transfer real phone calls. The live ElevenLabs workspace has no phone number or configured transfer destination, and `.env` has no `HUMAN_TRANSFER_NUMBER`. The monitored-handoff transcript, verified webhook, risk engine, fail-open behavior, and dashboard alert are implemented and tested; a real post-transfer audio sidecar is blocked on an actual Twilio/SIP conference media stream. See [`MONITORED_HANDOFF.md`](./MONITORED_HANDOFF.md) for the exact contract and setup boundary.
-
-## Monitored-handoff verification
+## Tests
 
 ```sh
-node --test tests/monitored-handoff.test.mjs
+cargo +stable fmt --all -- --check
+cargo +stable test --workspace
+cargo +stable clippy --workspace --all-targets -- -D warnings
 ```
 
-The test rejects an invalid webhook signature, accepts a disclosed human handoff, streams supplier/caller transcript chunks, emits the exact payment-change warning with evidence, confirms the AI-muted state, and verifies that a monitoring failure leaves the human transfer connected.
+The tests cover ordinary, unverified supplier, and high-risk transfer decisions; every high-risk class; HMAC validation; and the HTTP assessment contract.
 
-## Exact next task for teammate two
+## ElevenLabs setup
 
-Connect the existing verified webhook contract to a real Twilio or SIP conference media stream after a number and human destination are supplied. Keep the carrier stream read-only and the AI removed from the conference.
+Webhook tools call external APIs, while `transfer_to_number` and `end_call` remain ElevenLabs system tools. To attach the two policy tools to the live agent, expose this server on a public HTTPS origin and run:
+
+```sh
+PUBLIC_BASE_URL=https://your-origin.example node scripts/apply-policy-tools.mjs
+```
+
+Then apply the transfer template only after a real E.164 teammate destination exists:
+
+```sh
+node scripts/apply-transfer.mjs
+```
+
+Configure the workspace post-call transcription webhook to send to `/webhooks/elevenlabs/post-call` and put its generated secret in `ELEVENLABS_WEBHOOK_SECRET`.
+
+## Deliberate boundaries
+
+This repository does not include a Rust/WASM frontend, microservices, Kubernetes, a custom WebRTC stack, or Postgres. SQLite is enough for the single-business demo. A later multi-tenant deployment can move persistence behind the same `EventStore` boundary.
+
+The browser widget cannot perform a real phone transfer. Conference transfer requires an ElevenLabs-compatible Twilio or SIP number and a real destination. The current prompt and transfer template require a fresh Rust approval before transfer, but ElevenLabs still executes the system tool; production assurance should also use platform guardrails and live integration testing.

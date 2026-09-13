@@ -1,0 +1,47 @@
+{
+  "tool_config": {
+    "type": "webhook",
+    "name": "finish_call",
+    "description": "Persist a concise call outcome after the interaction is complete. The Rust service re-evaluates risk before storing the summary.",
+    "response_timeout_secs": 5,
+    "api_schema": {
+      "url": "__PUBLIC_BASE_URL__/tool/finish",
+      "method": "POST",
+      "request_body_schema": {
+        "type": "object",
+        "description": "Final caller context and concise outcome.",
+        "required": ["context", "outcome", "summary"],
+        "properties": {
+          "context": {
+            "type": "object",
+            "description": "The same caller facts sent to assess_call, including faithful transcript excerpts.",
+            "required": ["call_id", "requested_action"],
+            "properties": {
+              "call_id": { "type": "string", "description": "The current ElevenLabs conversation ID." },
+              "caller_name": { "type": "string", "description": "Claimed caller name, or empty." },
+              "claimed_company": { "type": "string", "description": "Claimed business, or empty." },
+              "business_caller": { "type": "boolean", "description": "True for a supplier, delivery, provider, technician, or other business caller." },
+              "requested_action": { "type": "string", "description": "Faithful, concise wording of what the caller wanted." },
+              "transcript": {
+                "type": "array",
+                "description": "Risk-relevant caller statements.",
+                "items": {
+                  "type": "object",
+                  "required": ["role", "message"],
+                  "properties": {
+                    "role": { "type": "string", "description": "Use user for caller speech." },
+                    "message": { "type": "string", "description": "The caller's relevant words." }
+                  }
+                }
+              }
+            }
+          },
+          "outcome": { "type": "string", "description": "answered, message taken, transferred, refused, or disconnected." },
+          "summary": { "type": "string", "description": "A concise summary without credentials, codes, or payment data." }
+        }
+      },
+      "request_headers": {}
+    },
+    "dynamic_variables": { "dynamic_variable_placeholders": {} }
+  }
+}

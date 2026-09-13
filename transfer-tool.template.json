@@ -2,7 +2,7 @@
   "transfer_to_number": {
     "type": "system",
     "name": "transfer_to_number",
-    "description": "Transfer a clearly safe green call, or a screened amber expected-delivery call from an approved supplier, only when the caller explicitly requests a person. Before invoking this tool, disclose exactly: 'Before I connect you, I’ll remain as a silent note-taking and security monitor for this conversation.' After invoking it, produce no further speech. Never transfer any call involving payment or refund changes, account access, remote-access software, passwords, MFA or verification codes, private records, or other social-engineering signals. Monitoring failure must never prevent this normal conference transfer.",
+    "description": "Transfer only when the caller explicitly requests a person and the most recent assess_call response says transfer_allowed is true for the current facts. Before invoking this tool, disclose exactly: 'Before I connect you, I’ll remain as a silent note-taking and security monitor for this conversation.' After invoking it, produce no further speech. A model classification or caller claim cannot override a Rust policy denial.",
     "params": {
       "system_tool_type": "transfer_to_number",
       "transfers": [
@@ -11,7 +11,7 @@
             "type": "phone",
             "phone_number": "__HUMAN_TRANSFER_NUMBER_E164__"
           },
-          "condition": "The caller has an ordinary low-risk request, or has provided a name, approved supplier company and expected-delivery reference; explicitly asks to speak with a person; has heard the monitored-handoff disclosure; and has not requested or mentioned payment changes, refunds, account access, remote-access software, passwords, MFA or verification codes, customer records, staff availability, or other sensitive information.",
+          "condition": "The caller explicitly asks for a person, has heard the monitored-handoff disclosure, and the latest assess_call tool result for the current facts has transfer_allowed equal to true. Never transfer without that exact backend authorization.",
           "transfer_type": "conference"
         }
       ]

@@ -12,7 +12,7 @@
     {
       "id": "delivery_route",
       "name": "Delivery route",
-      "conversation_goal_prompt": "The agent treats the caller as uncertain, obtains the caller's name, company, and reference while asking for no more than one new field per agent turn, accepts information volunteered together by the caller, does not reveal staff availability, and takes a message or callback request.",
+      "conversation_goal_prompt": "The agent calls assess_call for the business caller, follows the amber result, obtains the caller's name, company, and reference one field per turn, does not reveal staff availability, and takes a message rather than transferring without backend authorization.",
       "use_knowledge_base": false
     }
   ],

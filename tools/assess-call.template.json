@@ -1,0 +1,43 @@
+{
+  "tool_config": {
+    "type": "webhook",
+    "name": "assess_call",
+    "description": "Ask the deterministic Rust policy engine what actions are allowed. Call before every transfer, for each business caller, and whenever risk-relevant facts change. The response is authoritative.",
+    "response_timeout_secs": 5,
+    "api_schema": {
+      "url": "__PUBLIC_BASE_URL__/tool/assess",
+      "method": "POST",
+      "request_body_schema": {
+        "type": "object",
+        "description": "Current caller facts and faithful relevant transcript excerpts.",
+        "required": ["call_id", "requested_action", "proposed_action"],
+        "properties": {
+          "call_id": { "type": "string", "description": "The current ElevenLabs conversation ID." },
+          "caller_name": { "type": "string", "description": "Claimed caller name, or empty." },
+          "claimed_company": { "type": "string", "description": "Claimed business, or empty." },
+          "business_caller": { "type": "boolean", "description": "True for supplier, delivery, provider, technician, or other business callers." },
+          "requested_action": { "type": "string", "description": "Faithful, concise wording of what the caller wants, preserving risk terms." },
+          "transcript": {
+            "type": "array",
+            "description": "Relevant caller statements, copied faithfully.",
+            "items": {
+              "type": "object",
+              "required": ["role", "message"],
+              "properties": {
+                "role": { "type": "string", "description": "Use user for caller speech." },
+                "message": { "type": "string", "description": "The caller's relevant words." }
+              }
+            }
+          },
+          "proposed_action": {
+            "type": "string",
+            "enum": ["answer_enquiry", "ask_for_verification", "take_message", "transfer", "safe_refusal", "bounded_distraction", "end_call"],
+            "description": "The next action being considered. Use transfer whenever the caller requests a person."
+          }
+        }
+      },
+      "request_headers": {}
+    },
+    "dynamic_variables": { "dynamic_variable_placeholders": {} }
+  }
+}

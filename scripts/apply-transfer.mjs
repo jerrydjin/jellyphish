@@ -29,4 +29,4 @@ if (!response.ok) {
   throw new Error(`ElevenLabs update failed (${response.status}): ${await response.text()}`);
 }
 
-console.log(`Safe-green transfer rule applied to ${agentId}.`);
+console.log(`Rust-authorized transfer rule applied to ${agentId}.`);

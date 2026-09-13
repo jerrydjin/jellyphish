@@ -4,6 +4,8 @@ dist/
 build/
 .next/
 .turbo/
+target/
+data/
 
 # Python environments and caches
 .venv/
