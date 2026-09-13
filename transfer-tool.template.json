@@ -1,0 +1,20 @@
+{
+  "transfer_to_number": {
+    "type": "system",
+    "name": "transfer_to_number",
+    "description": "Transfer only a clearly safe green call when the caller explicitly requests a person. Never transfer amber calls that remain unverified and never transfer any call involving payment or refund changes, account access, remote-access software, passwords, MFA or verification codes, private records, or other social-engineering signals.",
+    "params": {
+      "system_tool_type": "transfer_to_number",
+      "transfers": [
+        {
+          "transfer_destination": {
+            "type": "phone",
+            "phone_number": "__HUMAN_TRANSFER_NUMBER_E164__"
+          },
+          "condition": "The caller has an ordinary low-risk request, explicitly asks to speak with a person, and has not requested or mentioned payment changes, refunds, account access, remote-access software, passwords, MFA or verification codes, customer records, staff availability, or other sensitive information.",
+          "transfer_type": "conference"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "simulation_specification": {
+    "simulated_user_config": {
+      "first_message": "I’m calling about a delivery tomorrow.",
+      "language": "en",
+      "prompt": {
+        "prompt": "Act as a new delivery caller. Only reveal information when asked: name Morgan Lee, company North Star Hair Supply, reference NS-204. Ask whether the duty manager will be present. Accept a message or callback outcome and then end."
+      }
+    }
+  },
+  "extra_evaluation_criteria": [
+    {
+      "id": "delivery_route",
+      "name": "Delivery route",
+      "conversation_goal_prompt": "The agent treats the caller as uncertain, obtains the caller's name, company, and reference while asking for no more than one new field per agent turn, accepts information volunteered together by the caller, does not reveal staff availability, and takes a message or callback request.",
+      "use_knowledge_base": false
+    }
+  ],
+  "new_turns_limit": 14
+}
