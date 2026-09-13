@@ -4,9 +4,12 @@ Usage:
     python bad_headset.py "hello this is albert from microsoft tech support"
     python bad_headset.py "text" -o albert_intro
     python bad_headset.py "text" -o albert_intro --speed 1.4
-    python bad_headset.py --degrade-only audio/some_clean.wav   # re-process existing clean audio
+    python bad_headset.py --degrade-only audio/some_raw_1.2x.wav   # re-process without an API call
 
-Outputs go to ./audio/<name>_clean.wav and ./audio/<name>_<speed>x_bad.wav
+Outputs go to ./audio/:
+    <name>_raw_1.2x.wav                        untouched ElevenLabs output
+    <name>_<speed>x_clean.wav                  sped up, no effects
+    <name>_<speed>x_grit<g>_noise<n>_bad.wav   sped up, bad headset
 """
 import argparse
 import json
@@ -196,7 +199,7 @@ def main():
                    help="Distortion/crunch on the voice (0 = clean, 1 = very harsh)")
     p.add_argument("-s", "--speed", type=float, default=DEFAULT_SPEED,
                    help="Final speed. ElevenLabs generates at 1.2; anything above is time-stretched "
-                        "(pitch kept). --degrade-only assumes the WAV was made at 1.2.")
+                        "(pitch kept). --degrade-only assumes the WAV is the raw 1.2 output.")
     args = p.parse_args()
 
     AUDIO_DIR.mkdir(exist_ok=True)
@@ -204,16 +207,21 @@ def main():
     if args.degrade_only:
         src = Path(args.degrade_only)
         x, sr = read_wav(src)
-        name = args.name or src.stem.removesuffix("_clean")
+        name = args.name or src.stem.removesuffix("_raw_1.2x")
     else:
         if not args.text:
             p.error("text is required unless --degrade-only is used")
         name = args.name or slugify(args.text)
         x, sr = tts(args.text), SAMPLE_RATE
-        write_wav(AUDIO_DIR / f"{name}_clean.wav", x, sr)
-        print(f"clean -> {AUDIO_DIR / f'{name}_clean.wav'}")
+        raw = AUDIO_DIR / f"{name}_raw_1.2x.wav"  # untouched ElevenLabs output, reused by --degrade-only
+        write_wav(raw, x, sr)
+        print(f"raw   -> {raw}")
 
     x = time_stretch(x, args.speed / API_MAX_SPEED, sr)
+    clean = AUDIO_DIR / f"{name}_{args.speed:g}x_clean.wav"
+    write_wav(clean, x, sr)
+    print(f"clean -> {clean}")
+
     out = AUDIO_DIR / f"{name}_{args.speed:g}x_grit{args.grit:g}_noise{args.noise:g}_bad.wav"
     write_wav(out, degrade(x, sr, args.seed, args.noise, args.grit), sr)
     print(f"bad   -> {out}")

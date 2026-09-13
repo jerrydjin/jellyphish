@@ -1,3 +1,5 @@
+<p align="center"><img src="jellyphis-icon-white.png" alt="Jellyphish icon" width="160" /></p>
+
 # Jellyphish — managed voice, deterministic policy
 
 Jellyphish is a screened AI front desk for small businesses. ElevenLabs owns realtime voice and call controls; a Rust service makes the safety decisions, records events, and serves a small operator console.
