@@ -91,12 +91,14 @@ The tests cover ordinary, unverified supplier, and high-risk transfer decisions;
 
 ## ElevenLabs setup
 
-Deploy prompt and spoken-output guardrail changes to the live agent with:
+Deploy prompt and voice-safety changes to the live agent with:
 
 ```sh
 node scripts/deploy-agent-safety.mjs
 node scripts/deploy-dental-agent.mjs
 ```
+
+The agents keep ElevenLabs Focus enabled and enforce caller-facing speech in the system prompt. Retrying custom output guardrails are intentionally disabled: on voice calls, a false positive can replay the same sentence up to three times and then terminate the call.
 
 Webhook tools call external APIs, while `transfer_to_number` and `end_call` remain ElevenLabs system tools. To attach the two policy tools to the live agent, expose this server on a public HTTPS origin and run:
 

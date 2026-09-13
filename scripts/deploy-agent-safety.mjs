@@ -58,7 +58,7 @@ const updateResponse = await fetch(endpoint, {
     name: source.name,
     conversation_config: current.conversation_config,
     platform_settings: current.platform_settings,
-    version_description: "Red stays on the line until the caller drops",
+    version_description: "Prevent guardrail retry loops and preserve live calls",
   }),
 });
 if (!updateResponse.ok) throw new Error(`Updating agent failed (${updateResponse.status}): ${await updateResponse.text()}`);
@@ -68,7 +68,7 @@ if (!verifiedResponse.ok) throw new Error(`Verifying agent failed (${verifiedRes
 const verified = await verifiedResponse.json();
 const deployedPrompt = verified.conversation_config?.agent?.prompt?.prompt || "";
 const guardrails = verified.platform_settings?.guardrails;
-const speechGuardrail = guardrails?.custom?.config?.configs?.find(({ name }) => name === "Caller-facing speech only");
+const enabledCustomGuardrails = (guardrails?.custom?.config?.configs || []).filter(({ is_enabled }) => is_enabled);
 const deployedEndCall = (verified.conversation_config?.agent?.prompt?.tools || []).find(({ name }) => name === "end_call");
 const deployedAssessment = (verified.conversation_config?.agent?.prompt?.tools || []).find(({ name }) => name === "assess_call_browser");
 const deployedTransfer = (verified.conversation_config?.agent?.prompt?.tools || []).find(({ name }) => name === "transfer_to_human");
@@ -80,9 +80,7 @@ if (
   deployedFirstMessage !== source.conversation_config.agent.first_message ||
   deployedDuration !== source.conversation_config.conversation.max_duration_seconds ||
   !guardrails?.focus?.is_enabled ||
-  !speechGuardrail?.is_enabled ||
-  speechGuardrail.execution_mode !== "blocking" ||
-  speechGuardrail.trigger_action?.type !== "retry" ||
+  enabledCustomGuardrails.length !== 0 ||
   deployedEndCall?.description !== endCallDescription ||
   deployedAssessment?.type !== "client" ||
   deployedAssessment?.expects_response !== true ||
@@ -94,4 +92,4 @@ if (
 }
 
 const hash = crypto.createHash("sha256").update(deployedPrompt).digest("hex").slice(0, 12);
-console.log(`Deployed and verified ${agentId}: prompt ${hash}, assess_call_browser and transfer_to_human on, caller-facing guardrails on.`);
+console.log(`Deployed and verified ${agentId}: prompt ${hash}, routing tools on, Focus on, retrying voice guardrails off.`);

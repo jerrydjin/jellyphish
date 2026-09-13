@@ -73,7 +73,7 @@ const updateResponse = await fetch(endpoint, {
     name: source.name,
     conversation_config: current.conversation_config,
     platform_settings: current.platform_settings,
-    version_description: "Evan & Kevin Dental inbound (Net)",
+    version_description: "Prevent guardrail retry loops and preserve live calls",
   }),
 });
 if (!updateResponse.ok) throw new Error(`Updating agent failed (${updateResponse.status}): ${await updateResponse.text()}`);
@@ -83,8 +83,17 @@ if (!verifiedResponse.ok) throw new Error(`Verifying agent failed (${verifiedRes
 const verified = await verifiedResponse.json();
 const deployedPrompt = verified.conversation_config?.agent?.prompt?.prompt || "";
 const deployedFirstMessage = verified.conversation_config?.agent?.first_message || "";
-if (deployedPrompt !== prompt || deployedFirstMessage !== source.conversation_config.agent.first_message) {
+const guardrails = verified.platform_settings?.guardrails;
+const enabledCustomGuardrails = (guardrails?.custom?.config?.configs || []).filter(({ is_enabled }) => is_enabled);
+const deployedEvents = verified.conversation_config?.conversation?.client_events || [];
+if (
+  deployedPrompt !== prompt ||
+  deployedFirstMessage !== source.conversation_config.agent.first_message ||
+  !guardrails?.focus?.is_enabled ||
+  enabledCustomGuardrails.length !== 0 ||
+  !["tentative_user_transcript", "internal_tentative_agent_response", "agent_response"].every((name) => deployedEvents.includes(name))
+) {
   throw new Error("Dental agent update returned successfully but the deployed prompt did not verify");
 }
 const hash = crypto.createHash("sha256").update(deployedPrompt).digest("hex").slice(0, 12);
-console.log(`Deployed and verified dental agent ${agentId}: prompt ${hash}.`);
+console.log(`Deployed and verified dental agent ${agentId}: prompt ${hash}, Focus on, retrying voice guardrails off.`);

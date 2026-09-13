@@ -6,6 +6,7 @@ const prompt = (await readFile(new URL("../agent-prompt.md", import.meta.url), "
 const config = JSON.parse(await readFile(new URL("../elevenlabs-agent.json", import.meta.url), "utf8"));
 const transferTemplate = JSON.parse(await readFile(new URL("../transfer-tool.template.json", import.meta.url), "utf8"));
 const deployScript = await readFile(new URL("../scripts/deploy-agent-safety.mjs", import.meta.url), "utf8");
+const dentalDeployScript = await readFile(new URL("../scripts/deploy-dental-agent.mjs", import.meta.url), "utf8");
 const phoneSource = await readFile(new URL("../web/phone/index.html", import.meta.url), "utf8");
 const handoffSource = await readFile(new URL("../web/handoff-call.mjs", import.meta.url), "utf8");
 const dashboardSource = await readFile(new URL("../web/index.html", import.meta.url), "utf8");
@@ -34,6 +35,17 @@ test("bounded distraction plays along instead of only asking verification questi
   assert.match(prompt, /Never invoke end_call on this route/i);
   assert.match(prompt, /Never hang up. Keep talking until their line drops/i);
   assert.doesNotMatch(prompt, /up to eight agent turns/i);
+  assert.match(prompt, /never repeat or closely paraphrase your previous spoken sentence/i);
+  assert.match(prompt, /never repeat it or merely swap a few words/i);
+});
+
+test("voice safety cannot retry the same line or terminate a valid call", () => {
+  const guardrails = config.platform_settings.guardrails;
+  assert.equal(guardrails.focus.is_enabled, true);
+  assert.deepEqual(guardrails.custom.config.configs, []);
+  assert.match(deployScript, /enabledCustomGuardrails\.length !== 0/);
+  assert.match(dentalDeployScript, /enabledCustomGuardrails\.length !== 0/);
+  assert.doesNotMatch(JSON.stringify(guardrails), /"type":"retry"/);
 });
 
 test("the browser agent records Sol's classification on a client tool", () => {
@@ -96,4 +108,5 @@ test("Evan & Kevin Dental uses Net with the same routing contract", async () => 
   assert.equal(dental.conversation_config.agent.prompt.prompt, dentalPrompt);
   assert.match(dental.conversation_config.agent.first_message, /this is Net/i);
   assert.equal(dental.name, "Evan & Kevin Dental Front Desk");
+  assert.deepEqual(dental.platform_settings.guardrails.custom.config.configs, []);
 });
