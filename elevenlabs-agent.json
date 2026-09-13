@@ -128,7 +128,6 @@
         "agent_response",
         "agent_response_correction",
         "internal_tentative_agent_response",
-        "agent_chat_response_part",
         "client_tool_call",
         "conversation_initiation_metadata",
         "ping"

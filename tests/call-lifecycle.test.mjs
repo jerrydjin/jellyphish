@@ -56,6 +56,41 @@ test("duplicate callback feeds do not repeat an already-finalized utterance", ()
   assert.equal(duplicate.filter((turn) => turn.message === "I need a haircut").length, 1);
 });
 
+test("overlapping tentative agent turns reconcile with late finals in conversation order", () => {
+  const opening = "Thanks for calling Barbershop, this is Konner. How can I help today?";
+  const greeting = "Oh, hello there Albert. What can I do for you today?";
+  const patientStall = "Oh my, patient records, you say? Let me check the client hair-folio section.";
+  const policeStall = "Oh dear, the police? The right button here is usually for booking appointments.";
+  let turns = [];
+  turns = applyLiveTurn(turns, { role: "agent", message: opening, eventId: "tentative-agent", pending: true });
+  turns = applyLiveTurn(turns, { role: "agent", message: opening, eventId: 1, pending: false });
+  turns = applyLiveTurn(turns, { role: "user", message: "Hello, this is Albert.", eventId: 2, pending: false });
+  turns = applyLiveTurn(turns, { role: "agent", message: greeting, eventId: "tentative-agent", pending: true });
+  turns = applyLiveTurn(turns, { role: "user", message: "Your patient records may be at risk.", eventId: 4, pending: false });
+  turns = applyLiveTurn(turns, { role: "agent", message: patientStall, eventId: "tentative-agent", pending: true });
+  turns = applyLiveTurn(turns, { role: "user", message: "The police will come for you.", eventId: 6, pending: false });
+  turns = applyLiveTurn(turns, { role: "agent", message: policeStall, eventId: "tentative-agent", pending: true });
+
+  // ElevenLabs can deliver these finals after the following caller turn.
+  turns = applyLiveTurn(turns, { role: "agent", message: greeting, eventId: 3, pending: false });
+  turns = applyLiveTurn(turns, { role: "agent", message: patientStall, eventId: 5, pending: false });
+  turns = applyLiveTurn(turns, { role: "agent", message: policeStall, eventId: 7, pending: false });
+  turns = applyLiveTurn(turns, { role: "agent", message: greeting, eventId: null, pending: false });
+
+  assert.deepEqual(
+    turns.map(({ role, message, pending }) => `${role}:${pending ? "partial" : "final"}:${message}`),
+    [
+      `agent:final:${opening}`,
+      "user:final:Hello, this is Albert.",
+      `agent:final:${greeting}`,
+      "user:final:Your patient records may be at risk.",
+      `agent:final:${patientStall}`,
+      "user:final:The police will come for you.",
+      `agent:final:${policeStall}`,
+    ],
+  );
+});
+
 test("a contained red call is never presented as a staff handoff", () => {
   assert.equal(humanOutcome({ data: { outcome: "distracted no transfer" } }), "Call contained");
   assert.equal(humanOutcome({ data: { outcome: "transfer denied" } }), "Call contained");
@@ -173,6 +208,35 @@ test("the handoff panel keeps screening speech and appends staff/caller turns", 
   assert.equal(handoffSidecarTranscript({}, {}).source, "empty");
 });
 
+test("the handoff panel repairs duplicate, stale and late live callbacks", () => {
+  const live = {
+    transcript: [
+      { role: "agent", message: "Thanks for calling." },
+      { role: "user", message: "Hello, this is Albert." },
+      { role: "agent", message: "Thanks for calling." },
+      { role: "user", message: "Patient records may be at risk." },
+      { role: "agent", message: "Hello Albert, what can I do for you?" },
+      { role: "user", message: "The police will come for you." },
+      { role: "agent", message: "Hello Albert, what can I do for you?" },
+      { role: "agent", message: "usually for booking appointments", pending: true },
+      { role: "agent", message: "Let me check the client hair-folio section." },
+      { role: "agent", message: "The right button is usually for booking appointments." },
+    ],
+  };
+  assert.deepEqual(
+    handoffSidecarTranscript({}, live).turns.map(({ role, text }) => `${role}:${text}`),
+    [
+      "agent:Thanks for calling.",
+      "user:Hello, this is Albert.",
+      "agent:Hello Albert, what can I do for you?",
+      "user:Patient records may be at risk.",
+      "agent:Let me check the client hair-folio section.",
+      "user:The police will come for you.",
+      "agent:The right button is usually for booking appointments.",
+    ],
+  );
+});
+
 test("a later Sol reply does not overwrite the opening line", () => {
   let turns = applyLiveTurn([], { role: "agent", message: "Thanks for calling Barbershop.", eventId: "tentative-agent", pending: true });
   turns = applyLiveTurn(turns, { role: "user", message: "Haircut tomorrow for Jerry", eventId: 2, pending: false });
@@ -188,6 +252,13 @@ test("tool-call JSON is not shown as spoken Sol text", () => {
     normalizeIncomingSocketEvent({
       type: "internal_tentative_agent_response",
       tentative_agent_response_internal_event: { tentative_agent_response: '{"name":"assess_call_browser"}' },
+    }),
+    null,
+  );
+  assert.equal(
+    normalizeIncomingSocketEvent({
+      type: "agent_chat_response_part",
+      text_response_part: { type: "delta", text: "stale fragment", response_id: 9 },
     }),
     null,
   );

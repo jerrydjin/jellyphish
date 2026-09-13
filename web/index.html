@@ -258,7 +258,7 @@
       </section>
     </main>
     <script type="module">
-      import { conversationListFingerprint, handoffSidecarTranscript, humanOutcome as presentHumanOutcome, liveElapsedSeconds, operatorStaffPhase, routePresentation, shouldAutoselectConversation } from "/call-lifecycle.mjs?v=stream6";
+      import { conversationListFingerprint, handoffSidecarTranscript, humanOutcome as presentHumanOutcome, liveElapsedSeconds, operatorStaffPhase, routePresentation, shouldAutoselectConversation } from "/call-lifecycle.mjs?v=stream7";
       import { fetchHandoffRoom, HandoffCall } from "/handoff-call.mjs?v=stream6";
 
       const $ = (id) => document.getElementById(id);
@@ -420,7 +420,8 @@
         $("live-caption").textContent = view.caption;
         $("live-route").textContent = presentation.label;
         $("live-route").className = `route-pill ${presentation.route}`;
-        $("live-lines").innerHTML = live.transcript.length ? live.transcript.slice(-8).map((turn) => `<div class="line ${escapeHTML(turn.role)}${turn.pending ? " pending" : ""}"><span class="line-role">${turn.role === "agent" ? biz.assistant : turn.role === "staff" ? "Staff" : "Caller"}</span><span class="line-text">${escapeHTML(turn.message)}</span></div>`).join("") : `<p class="empty">${view.empty}</p>`;
+        const visibleTranscript = handoffSidecarTranscript({}, live).turns;
+        $("live-lines").innerHTML = visibleTranscript.length ? visibleTranscript.slice(-8).map((turn) => `<div class="line ${escapeHTML(turn.role)}${turn.pending ? " pending" : ""}"><span class="line-role">${turn.role === "agent" ? biz.assistant : turn.role === "staff" ? "Staff" : "Caller"}</span><span class="line-text">${escapeHTML(turn.text)}</span></div>`).join("") : `<p class="empty">${view.empty}</p>`;
         $("live-lines").scrollTop = $("live-lines").scrollHeight;
         $("live-time").textContent = formatDuration(liveElapsedSeconds(live, serverNow()));
         renderMonitor();

@@ -91,6 +91,7 @@ if (
   deployedFirstMessage !== source.conversation_config.agent.first_message ||
   !guardrails?.focus?.is_enabled ||
   enabledCustomGuardrails.length !== 0 ||
+  deployedEvents.includes("agent_chat_response_part") ||
   !["tentative_user_transcript", "internal_tentative_agent_response", "agent_response"].every((name) => deployedEvents.includes(name))
 ) {
   throw new Error("Dental agent update returned successfully but the deployed prompt did not verify");

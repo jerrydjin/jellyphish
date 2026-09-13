@@ -80,14 +80,11 @@ export function normalizeIncomingSocketEvent(event) {
       const message = spokenText(data.agent_response || data.message);
       return message ? { role: "agent", message, eventId: data.event_id ?? null, pending: false } : null;
     }
-    case "agent_chat_response_part": {
-      const part = event.text_response_part || event;
-      const eventId = part.response_id || part.event_id || "agent-stream";
-      if (part.type === "start") return { role: "agent", message: "", eventId, pending: true, replace: true };
-      if (part.type === "delta") return { role: "agent", message: String(part.text || ""), eventId, pending: true, append: true };
-      if (part.type === "stop") return { role: "agent", message: "", eventId, pending: false, finalize: true };
+    // `internal_tentative_agent_response` already supplies the live preview.
+    // Consuming this second streaming feed as well can replay a full response
+    // or leave a trailing delta behind when its final callback arrives late.
+    case "agent_chat_response_part":
       return null;
-    }
     default:
       return null;
   }
@@ -110,7 +107,27 @@ function lastIndexWhere(items, predicate) {
 
 function turnIdentity(item, turn) {
   if (turn.eventId == null || item.eventId == null) return false;
+  // These are local placeholders reused across multiple spoken turns, not
+  // stable ElevenLabs event identities.
+  if (isStreamPlaceholder(item.eventId) || isStreamPlaceholder(turn.eventId)) return false;
   return item.role === turn.role && String(item.eventId) === String(turn.eventId);
+}
+
+function comparableMessage(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function sameMessageFamily(left, right) {
+  const a = comparableMessage(left);
+  const b = comparableMessage(right);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length > b.length ? a : b;
+  return shorter.length >= 12 && (longer.startsWith(shorter) || longer.includes(shorter));
 }
 
 // Caller finals often arrive after Sol has already started the next reply.
@@ -156,6 +173,38 @@ export function liveTranscriptPayload(turns = []) {
     }));
 }
 
+function cleanScreeningTurns(turns) {
+  const finals = turns.filter((turn) => !turn.pending);
+  const unique = [];
+  for (const turn of turns) {
+    if (
+      turn.pending &&
+      finals.some((finalTurn) =>
+        finalTurn.role === turn.role && sameMessageFamily(finalTurn.text, turn.text),
+      )
+    ) {
+      continue;
+    }
+    const key = `${turn.role}\u001f${comparableMessage(turn.text)}`;
+    if (unique.some((item) => item.key === key)) continue;
+    unique.push({ key, turn });
+  }
+  const cleaned = unique.map(({ turn }) => turn);
+  const agents = cleaned.filter((turn) => turn.role === "agent");
+  const users = cleaned.filter((turn) => turn.role === "user");
+  const canRestoreAlternation =
+    cleaned[0]?.role === "agent" &&
+    agents.length >= users.length &&
+    agents.length <= users.length + 1;
+  if (!canRestoreAlternation) return cleaned;
+  const ordered = [];
+  for (let index = 0; index < agents.length; index += 1) {
+    ordered.push(agents[index]);
+    if (users[index]) ordered.push(users[index]);
+  }
+  return ordered;
+}
+
 export function applyLiveTurn(transcript = [], turn) {
   if (!turn?.role) return transcript;
   const next = transcript.slice();
@@ -163,14 +212,25 @@ export function applyLiveTurn(transcript = [], turn) {
   const compatiblePending = () => {
     const index = identified();
     if (index >= 0) return index;
-    const pending = lastIndexWhere(next, (item) => item.role === turn.role && item.pending);
-    if (pending < 0) return -1;
-    const existing = next[pending];
-    if (String(existing.eventId) === String(turn.eventId)) return pending;
-    if (isStreamPlaceholder(existing.eventId) && isStreamPlaceholder(turn.eventId)) return pending;
-    if (!turn.pending && (!existing.message || turn.message.startsWith(existing.message) || existing.message.startsWith((turn.message || "").slice(0, 12)))) {
-      return pending;
+    const pendingIndexes = next
+      .map((item, itemIndex) => ({ item, itemIndex }))
+      .filter(({ item }) => item.role === turn.role && item.pending)
+      .map(({ itemIndex }) => itemIndex);
+    if (!pendingIndexes.length) return -1;
+
+    if (turn.message) {
+      const matching = pendingIndexes.findLast((itemIndex) =>
+        sameMessageFamily(next[itemIndex].message, turn.message),
+      );
+      if (matching != null) return matching;
     }
+
+    // A tentative reply may arrive before the previous tentative reply's
+    // final callback. Do not let it overwrite a placeholder that sits before
+    // a newer caller turn.
+    const lastOtherSpeaker = lastIndexWhere(next, (item) => item.role !== turn.role);
+    const latest = pendingIndexes.at(-1);
+    if (latest > lastOtherSpeaker) return latest;
     return -1;
   };
 
@@ -257,7 +317,9 @@ export function handoffSidecarTranscript(monitor = {}, live = {}) {
       pending: Boolean(turn.pending),
     }))
     .filter((turn) => turn.text);
-  const screening = fromLive.filter((turn) => turn.role === "agent" || turn.role === "user");
+  const screening = cleanScreeningTurns(
+    fromLive.filter((turn) => turn.role === "agent" || turn.role === "user"),
+  );
   const liveHuman = fromLive.filter((turn) => turn.role === "staff" || turn.role === "caller");
   const monitorHuman = (monitor.transcript || [])
     .map((turn) => ({

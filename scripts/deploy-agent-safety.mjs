@@ -86,6 +86,7 @@ if (
   deployedAssessment?.expects_response !== true ||
   deployedTransfer?.type !== "client" ||
   deployedTransfer?.expects_response !== true ||
+  deployedEvents.includes("agent_chat_response_part") ||
   !["tentative_user_transcript", "internal_tentative_agent_response", "agent_response"].every((name) => deployedEvents.includes(name))
 ) {
   throw new Error("Agent update returned successfully but the deployed safety settings did not verify");

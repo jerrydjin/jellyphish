@@ -83,6 +83,7 @@ test("the live browser session requests streaming caller and Sol transcript even
   for (const eventName of ["user_transcript", "tentative_user_transcript", "agent_response", "internal_tentative_agent_response"]) {
     assert.ok(events.includes(eventName), `missing ${eventName}`);
   }
+  assert.ok(!events.includes("agent_chat_response_part"), "redundant agent stream must stay disabled");
   assert.match(deployScript, /conversation\.client_events = source\.conversation_config\.conversation\.client_events/);
 });
 
