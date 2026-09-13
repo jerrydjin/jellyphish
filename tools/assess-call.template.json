@@ -16,6 +16,7 @@
           "risk_level": { "type": "string", "enum": ["green", "amber", "red"], "description": "Sol's silent classification of this caller." },
           "caller_name": { "type": "string", "description": "Claimed caller name, or empty." },
           "claimed_company": { "type": "string", "description": "Claimed business, or empty." },
+          "reference": { "type": "string", "description": "Invoice, PO, account, ticket, or other reference stated by the caller, or empty." },
           "business_caller": { "type": "boolean", "description": "True for supplier, delivery, provider, technician, or other business callers." },
           "requested_action": { "type": "string", "description": "Faithful, concise wording of what the caller wants, preserving risk terms." },
           "transcript": {
@@ -33,7 +34,7 @@
           "proposed_action": {
             "type": "string",
             "enum": ["answer_enquiry", "ask_for_verification", "take_message", "transfer", "safe_refusal", "bounded_distraction", "end_call"],
-            "description": "The next action being considered. Use transfer whenever the caller requests a person."
+            "description": "The next action being considered. Use transfer for a green customer with name and service, or a screened amber caller with name and, if a business caller, company."
           }
         }
       },

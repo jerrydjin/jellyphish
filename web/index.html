@@ -258,8 +258,8 @@
       </section>
     </main>
     <script type="module">
-      import { conversationListFingerprint, handoffSidecarTranscript, humanOutcome as presentHumanOutcome, liveElapsedSeconds, operatorStaffPhase, routePresentation, shouldAutoselectConversation } from "/call-lifecycle.mjs?v=stream7";
-      import { fetchHandoffRoom, HandoffCall } from "/handoff-call.mjs?v=stream6";
+      import { callerFacingSpeech, conversationListFingerprint, handoffSidecarTranscript, humanOutcome as presentHumanOutcome, liveElapsedSeconds, operatorStaffPhase, routePresentation, shouldAutoselectConversation } from "/call-lifecycle.mjs?v=stream8";
+      import { fetchHandoffRoom, HandoffCall } from "/handoff-call.mjs?v=stream10";
 
       const $ = (id) => document.getElementById(id);
       const BUSINESSES = {
@@ -507,7 +507,12 @@
         const legacyLeak = (call.transcript || []).some((turn) => turn.role === "agent" && /(red tarpit|routing model|the user provided|i am still in red)/i.test(turn.message));
         $("detail-meta").textContent = `${formatClock(call.startedAt)} · ${formatDuration(call.duration)}`;
         const factsMarkup = facts.length ? `<details class="detail-inspector"><summary>Call details</summary><div class="facts">${facts.map(([label, value]) => `<div class="fact"><small>${escapeHTML(label)}</small><span class="fact-value" title="${escapeHTML(value)}">${escapeHTML(value)}</span></div>`).join("")}</div></details>` : "";
-        $("detail").innerHTML = `<div style="margin-bottom:8px"><h3 class="detail-title">${escapeHTML(call.title || "Call transcript")}</h3></div>${legacyLeak ? `<div class="notice">This older transcript predates the spoken-output firewall. The current agent passed the no-internal-monologue regression.</div>` : ""}<p class="detail-summary">${escapeHTML(call.summary || "Analysis is still processing for this call.")}</p>${factsMarkup}${call.data?.risk_signals && call.data.risk_signals !== "none" ? `<div class="risk"><span>Risk signals: </span>${escapeHTML(call.data.risk_signals)}</div>` : ""}<div class="transcript">${(call.transcript || []).map((turn) => `<div class="bubble ${escapeHTML(turn.role)}"><small>${turn.role === "agent" ? biz.assistant : "Caller"} · ${formatDuration(turn.time)}${turn.interrupted ? " · interrupted" : ""}</small>${escapeHTML(turn.message)}</div>`).join("") || `<p class="empty">Transcript is not available yet.</p>`}</div>`;
+        const transcriptMarkup = (call.transcript || []).map((turn) => {
+          const message = turn.role === "agent" ? callerFacingSpeech(turn.message) : String(turn.message || "").trim();
+          if (!message) return "";
+          return `<div class="bubble ${escapeHTML(turn.role)}"><small>${turn.role === "agent" ? biz.assistant : "Caller"} · ${formatDuration(turn.time)}${turn.interrupted ? " · interrupted" : ""}</small>${escapeHTML(message)}</div>`;
+        }).join("") || `<p class="empty">Transcript is not available yet.</p>`;
+        $("detail").innerHTML = `<div style="margin-bottom:8px"><h3 class="detail-title">${escapeHTML(call.title || "Call transcript")}</h3></div>${legacyLeak ? `<div class="notice">This older transcript predates the spoken-output firewall. The current agent passed the no-internal-monologue regression.</div>` : ""}<p class="detail-summary">${escapeHTML(call.summary || "Analysis is still processing for this call.")}</p>${factsMarkup}${call.data?.risk_signals && call.data.risk_signals !== "none" ? `<div class="risk"><span>Risk signals: </span>${escapeHTML(call.data.risk_signals)}</div>` : ""}<div class="transcript">${transcriptMarkup}</div>`;
       }
 
       function settledMonitor(monitor) {

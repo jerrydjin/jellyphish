@@ -98,7 +98,7 @@ node scripts/deploy-agent-safety.mjs
 node scripts/deploy-dental-agent.mjs
 ```
 
-The agents keep ElevenLabs Focus enabled and enforce caller-facing speech in the system prompt. Retrying custom output guardrails are intentionally disabled: on voice calls, a false positive can replay the same sentence up to three times and then terminate the call.
+The agents keep ElevenLabs Focus enabled and a blocking caller-facing speech guardrail. That guardrail only retries when the model appends internal thought; ordinary stall sentences are allowed so a false positive cannot loop and drop the call.
 
 Webhook tools call external APIs, while `transfer_to_number` and `end_call` remain ElevenLabs system tools. To attach the two policy tools to the live agent, expose this server on a public HTTPS origin and run:
 

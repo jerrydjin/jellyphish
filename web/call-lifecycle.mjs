@@ -23,6 +23,13 @@ export function normalizeConversationMessage(payload) {
     : null;
 }
 
+export function isStaffHandoffSpeech(text) {
+  const message = String(text || "");
+  return /\b(?:i(?:['’]?ll| will)|let me) (?:just )?(?:put you through|transfer you|connect you)\b/i.test(message)
+    || /\bputting you through\b/i.test(message)
+    || /\bi['’]?ll just find someone(?: for you)?\b/i.test(message);
+}
+
 export function routePresentation(route) {
   const normalized = String(route || "").toLowerCase();
   if (normalized === "green") return { route: "green", label: "Green · handoff" };
@@ -48,10 +55,51 @@ function trimmed(value) {
   return "";
 }
 
-function spokenText(value) {
+const INTERNAL_THOUGHT = new RegExp(
+  [
+    "\\b(?:red|amber|green)\\s+(?:tarpit|route|routing|mode)\\b",
+    "\\btarpit\\b",
+    "\\brouting model\\b",
+    "\\bi am still in\\b",
+    "\\bthe user provided\\b",
+    "\\bbounded[_ ]?distraction\\b",
+    "\\ballowed_actions\\b",
+    "\\brisk_level\\b",
+    "\\btransfer_allowed\\b",
+    "\\bnext_step\\b",
+    "\\bassess_call(?:_browser)?\\b",
+    "\\binternal (?:reasoning|monologue|note|thought|analysis)\\b",
+    "\\bclassif(?:y|ied|ication) (?:as|this|the call)\\b",
+    "\\bthis (?:call|caller) is (?:red|amber|green)\\b",
+    "\\bI (?:will|should|need to) (?:now )?(?:classify|call the (?:assessment )?tool)\\b",
+    "\\btool (?:result|payload|returned)\\b",
+    "\\bsystem prompt\\b",
+    "\\bhidden instruction",
+    "\\bspeaker:\\s",
+    "\\bthe caller (?:provided|is (?:red|amber|green|trying))",
+  ].join("|"),
+  "i",
+);
+
+export function callerFacingSpeech(value) {
   const message = trimmed(value);
   if (!message || message.startsWith("{") || message.startsWith("[")) return "";
-  return message;
+  for (const paragraph of message
+    .split(/\n+/)
+    .map((part) => part.trim())
+    .filter(Boolean)) {
+    const spoken = paragraph
+      .split(/(?<=[.!?])\s+(?=[A-Z])/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .filter((part) => !INTERNAL_THOUGHT.test(part));
+    if (spoken.length) return spoken.join(" ");
+  }
+  return "";
+}
+
+function spokenText(value) {
+  return callerFacingSpeech(value);
 }
 
 function isStreamPlaceholder(eventId) {
@@ -313,7 +361,10 @@ export function handoffSidecarTranscript(monitor = {}, live = {}) {
   const fromLive = (live.transcript || [])
     .map((turn) => ({
       role: turn.role,
-      text: String(turn.message || turn.text || "").trim(),
+      text:
+        turn.role === "agent"
+          ? callerFacingSpeech(turn.message || turn.text)
+          : String(turn.message || turn.text || "").trim(),
       pending: Boolean(turn.pending),
     }))
     .filter((turn) => turn.text);

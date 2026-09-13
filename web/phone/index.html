@@ -360,8 +360,8 @@
     <audio id="handoff-remote" autoplay playsinline></audio>
 
     <script type="module">
-      import { applyLiveTurn, liveTranscriptPayload, normalizeConversationMessage, normalizeIncomingSocketEvent } from "/call-lifecycle.mjs?v=stream7";
-      import { callerPreviewFromTurns, HandoffCall } from "/handoff-call.mjs?v=stream6";
+      import { applyLiveTurn, isStaffHandoffSpeech, liveTranscriptPayload, normalizeConversationMessage, normalizeIncomingSocketEvent } from "/call-lifecycle.mjs?v=stream12";
+      import { callerPreviewFromTurns, HandoffCall } from "/handoff-call.mjs?v=stream10";
 
       let ConversationClient = null;
       const clientReady = import("https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.25.0/+esm")
@@ -660,7 +660,44 @@
       let call = null;
       let callerHandoff = null;
       let handoffRelease = false;
+      let handoffInFlight = false;
       let handoffRingTimer = null;
+      let pendingAgentRelease = null;
+
+      function releaseAgentSession(session) {
+        if (!session) return;
+        Promise.resolve(session.endSession?.()).catch(() => {});
+      }
+
+      function scheduleAgentRelease(current, session) {
+        if (pendingAgentRelease) {
+          clearTimeout(pendingAgentRelease);
+          pendingAgentRelease = null;
+        }
+        if (!session) return;
+        const started = Date.now();
+        const tryRelease = () => {
+          pendingAgentRelease = null;
+          const speaking = String(current.mode || "").toLowerCase() === "speaking";
+          const waited = Date.now() - started;
+          if (speaking && waited < 5000) {
+            pendingAgentRelease = setTimeout(tryRelease, 200);
+            return;
+          }
+          if (!speaking && waited < 2000) {
+            pendingAgentRelease = setTimeout(tryRelease, 2000 - waited);
+            return;
+          }
+          if (current.session === session) current.session = null;
+          releaseAgentSession(session);
+          setTimeout(() => {
+            Promise.resolve(callerHandoff?.reviveLocalAudio?.()).catch((error) => {
+              console.warn("[phone] revive caller mic", error);
+            });
+          }, 300);
+        };
+        pendingAgentRelease = setTimeout(tryRelease, 400);
+      }
 
       function startHandoffRingback() {
         stopHandoffRingback();
@@ -678,10 +715,15 @@
       }
 
       async function startStaffHandoff(current, parameters = {}) {
+        if (!current?.line || current.over) return { status: "skipped" };
+        if (String(current.route || "").toLowerCase() === "red") return { status: "denied" };
+        current.session?.setMicMuted?.(true);
+        if (callerHandoff || handoffInFlight || handoffRelease) return { status: "ringing" };
+        handoffInFlight = true;
+        const preview = callerPreviewFromTurns(current.transcript);
         const sessionId = current.conversationId || current.id;
         if (!current.conversationId) current.conversationId = sessionId;
-        const preview = callerPreviewFromTurns(current.transcript);
-        callerHandoff = new HandoffCall({
+        const openHandoff = () => new HandoffCall({
           role: "caller",
           line: current.line,
           sessionId,
@@ -692,6 +734,7 @@
               stopHandoffRingback();
               callerHandoff = null;
               handoffRelease = false;
+              handoffInFlight = false;
               if (!current.over) finishCall(current);
             }
           },
@@ -699,28 +742,33 @@
             ingestLiveTurn(current, { role: role === "staff" ? "staff" : "caller", message: text, pending: false });
           },
         });
+        const payload = {
+          disclosureGiven: parameters.disclosure_given !== false,
+          callerName: preview.callerName,
+          requestedAction: [preview.claimedCompany, preview.reference, preview.requestedAction || parameters.requested_action || ""].filter(Boolean).join(" · "),
+        };
+        callerHandoff = openHandoff();
         try {
-          await callerHandoff.startCaller({
-            disclosureGiven: parameters.disclosure_given !== false,
-            callerName: preview.callerName,
-            requestedAction: preview.requestedAction || parameters.requested_action || "",
-          });
+          await callerHandoff.startCaller(payload);
         } catch (error) {
-          stopHandoffRingback();
           callerHandoff.close(false);
-          callerHandoff = null;
-          handoffRelease = false;
-          throw error;
+          callerHandoff = openHandoff();
+          try {
+            await callerHandoff.startCaller(payload);
+          } catch (retryError) {
+            stopHandoffRingback();
+            callerHandoff.close(false);
+            callerHandoff = null;
+            handoffRelease = false;
+            handoffInFlight = false;
+            throw retryError;
+          }
         }
         startHandoffRingback();
-        // The staff leg now exists. Only now release the agent, so setup errors
-        // leave the caller with the original conversation instead of dead air.
-        // Resolve the client tool first; closing inside the callback makes
-        // ElevenLabs record an abandoned tool execution.
+        // Keep ElevenLabs up long enough to speak "I'll put you through now"
+        // before ending the agent session.
         handoffRelease = true;
-        const agentSession = current.session;
-        current.session = null;
-        setTimeout(() => Promise.resolve(agentSession?.endSession()).catch(() => {}), 250);
+        scheduleAgentRelease(current, current.session);
         return { status: "ringing" };
       }
 
@@ -766,15 +814,23 @@
               assess_call_browser: async (parameters = {}) => {
                 const callerTurns = current.transcript.filter((turn) => turn.role === "user");
                 const text = callerTurns.map((turn) => turn.message).join(" ");
+                const preview = callerPreviewFromTurns(current.transcript);
                 const riskLevel = String(parameters.risk_level || "").toLowerCase();
+                const callerName = parameters.caller_name || preview.callerName || null;
+                const claimedCompany = parameters.claimed_company || preview.claimedCompany || null;
+                const reference = parameters.reference || preview.reference || null;
+                const looksBusiness = /supplier|delivery|invoice|bank|payment|company/i.test(`${parameters.requested_action || ""} ${preview.requestedAction || ""}`);
+                const businessCaller = Boolean(parameters.business_caller) || Boolean(claimedCompany) || (riskLevel === "amber" && looksBusiness);
+                current.businessCaller = businessCaller;
                 const response = await fetch("/tool/assess", {
                   method: "POST",
                   headers: { "content-type": "application/json" },
                   body: JSON.stringify({
                     call_id: current.conversationId || current.id,
-                    caller_name: parameters.caller_name || null,
-                    claimed_company: parameters.claimed_company || null,
-                    business_caller: Boolean(parameters.business_caller),
+                    caller_name: callerName,
+                    claimed_company: claimedCompany,
+                    reference,
+                    business_caller: businessCaller,
                     requested_action: parameters.requested_action || text,
                     transcript: Array.isArray(parameters.transcript) && parameters.transcript.length ? parameters.transcript : callerTurns,
                     proposed_action: parameters.proposed_action || null,
@@ -813,6 +869,9 @@
               if (current.over || current.mode === mode) return;
               current.mode = mode;
               publish(current);
+              if (handoffRelease && String(mode).toLowerCase() !== "speaking") {
+                scheduleAgentRelease(current, current.session);
+              }
             },
             onIncomingEvent: (event) => ingestLiveTurn(current, normalizeIncomingSocketEvent(event)),
             onMessage: (payload) => ingestLiveTurn(current, normalizeConversationMessage(payload)),
@@ -843,14 +902,24 @@
         }
       }
 
+      function maybeStartHandoffFromSpeech(current) {
+        if (!current || current.over || callerHandoff || handoffInFlight || handoffRelease) return;
+        if (String(current.route || "").toLowerCase() === "red") return;
+        const spoken = [...current.transcript].reverse().find((item) => item.role === "agent" && isStaffHandoffSpeech(item.message));
+        if (!spoken) return;
+        startStaffHandoff(current).catch((error) => console.warn("[phone] speech handoff", error));
+      }
+
       function ingestLiveTurn(current, turn) {
         if (!turn || current.over) return;
         try {
           const previous = current.transcript;
           const next = applyLiveTurn(previous, turn);
-          if (next === previous) return;
-          current.transcript = next;
-          publish(current);
+          if (next !== previous) {
+            current.transcript = next;
+            publish(current);
+          }
+          maybeStartHandoffFromSpeech(current);
         } catch (error) {
           console.warn("[phone] transcript", error);
         }
@@ -871,7 +940,12 @@
         current.timers.forEach((timer) => { clearInterval(timer); clearTimeout(timer); });
         stopHandoffRingback();
         stopTones();
+        if (pendingAgentRelease) {
+          clearTimeout(pendingAgentRelease);
+          pendingAgentRelease = null;
+        }
         handoffRelease = false;
+        handoffInFlight = false;
         const handoff = callerHandoff;
         callerHandoff = null;
         if (handoff) Promise.resolve(handoff.hangup()).catch(() => {});

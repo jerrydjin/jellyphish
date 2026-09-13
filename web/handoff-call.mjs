@@ -21,9 +21,26 @@ export async function fetchHandoffRoom(line, sessionId) {
 export function callerPreviewFromTurns(turns = []) {
   const userTurns = turns.filter((turn) => turn.role === "user" || turn.role === "caller");
   const text = userTurns.map((turn) => turn.message || turn.text || "").join(" ").replace(/\s+/g, " ").trim();
-  const nameMatch = text.match(/(?:i(?:['’]m| am)|my name is|this is)\s+([A-Z][A-Za-z'-]+)/);
+  const nameStops = new Set(["and", "from", "about", "calling", "would", "like", "here", "with", "for", "the", "a", "an", "i", "it", "its"]);
+  const title = (part) => part.replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const nameMatch = text.match(/(?:it['’]?s|i(?:['’]m| am)|my name is|this is)\s+([A-Za-z][A-Za-z'-]+)(?:\s+([A-Za-z][A-Za-z'-]+))?/i);
+  let firstName = nameMatch?.[1] || "";
+  let lastName = nameMatch?.[2] && !nameStops.has(nameMatch[2].toLowerCase()) ? nameMatch[2] : "";
+  if (!firstName) {
+    const fromName = text.match(/\b([A-Za-z][A-Za-z'-]+)\s+from\s+[A-Za-z]/i);
+    if (fromName && !nameStops.has(fromName[1].toLowerCase())) firstName = fromName[1];
+  }
+  const callerName = [firstName, lastName].filter(Boolean).map(title).join(" ");
+  const companyMatch = text.match(/(?:from|company(?:\s+is)?|calling (?:from|on behalf of)|i work (?:at|for))\s+([A-Za-z][^,.]{1,50}?)(?:\s+business)?(?=\s+(?:about|regarding|calling|and|i['’]m|i am)|\s*[.,]|$)/i);
+  const claimedCompany = companyMatch ? companyMatch[1].trim().replace(/\s+/g, " ") : "";
+  const labeledReference = text.match(/\b(?:ref(?:erence)?|po|p\.?o\.?|invoice|ticket|account)\s*(?:number|no\.?|#|is|:)?\s*([A-Za-z0-9][A-Za-z0-9/-]{1,})\b/i);
+  const dottedReference = text.match(/\b([A-Z]{1,5}-\d{2,})\b/);
+  const rawReference = labeledReference?.[1] || dottedReference?.[1] || "";
+  const reference = /[0-9]/.test(rawReference) ? rawReference : "";
   return {
-    callerName: nameMatch ? nameMatch[1] : "",
+    callerName,
+    claimedCompany,
+    reference,
     requestedAction: text.slice(0, 180),
   };
 }
@@ -44,19 +61,23 @@ function recorderMime() {
   return types.find((type) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type)) || "";
 }
 
-function streamCaptions({ stream, role, line, sessionId, captionKey, enqueueUpload, onText, isClosed }) {
+function streamCaptions({ stream, role, line, sessionId, captionKey, enqueueUpload, onText, isClosed, reviveStream }) {
   const mime = recorderMime();
   if (!mime || !stream) return speechRecognizer(role, onText);
   let active = true;
+  let captureStream = stream;
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   let audioContext = null;
   let analyser = null;
   let samples = null;
-  if (AudioContext) {
+
+  function attachAnalyser(nextStream) {
+    if (!AudioContext || !nextStream) return;
     try {
+      audioContext?.close?.().catch(() => {});
       audioContext = new AudioContext();
       audioContext.resume?.().catch(() => {});
-      const source = audioContext.createMediaStreamSource(stream);
+      const source = audioContext.createMediaStreamSource(nextStream);
       analyser = audioContext.createAnalyser();
       analyser.fftSize = 1024;
       analyser.smoothingTimeConstant = 0.2;
@@ -66,8 +87,10 @@ function streamCaptions({ stream, role, line, sessionId, captionKey, enqueueUplo
       audioContext?.close?.().catch(() => {});
       audioContext = null;
       analyser = null;
+      samples = null;
     }
   }
+  attachAnalyser(captureStream);
 
   function speechLevel() {
     if (!analyser || !samples) return 1;
@@ -81,10 +104,10 @@ function streamCaptions({ stream, role, line, sessionId, captionKey, enqueueUplo
     const parts = [];
     let recorder;
     try {
-      recorder = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 24_000 });
+      recorder = new MediaRecorder(captureStream, { mimeType: mime, audioBitsPerSecond: 24_000 });
     } catch {
       try {
-        recorder = new MediaRecorder(stream, { mimeType: mime });
+        recorder = new MediaRecorder(captureStream, { mimeType: mime });
       } catch {
         return { blob: new Blob([], { type: mime }), speechDetected: false };
       }
@@ -151,8 +174,17 @@ function streamCaptions({ stream, role, line, sessionId, captionKey, enqueueUplo
 
   async function cycle() {
     while (active && !isClosed?.()) {
-      const tracks = stream.getAudioTracks();
+      const tracks = captureStream.getAudioTracks();
       if (!tracks.length || tracks.every((track) => track.readyState !== "live")) {
+        if (typeof reviveStream === "function") {
+          try {
+            const next = await reviveStream();
+            if (next) {
+              captureStream = next;
+              attachAnalyser(captureStream);
+            }
+          } catch {}
+        }
         await sleep(400);
         continue;
       }
@@ -224,6 +256,7 @@ export class HandoffCall {
     this.localStream = null;
     this.captions = [];
     this.captionQueue = Promise.resolve();
+    this.localCaptioned = false;
     this.remoteCaptioned = false;
     this.remoteSet = false;
     this.pendingIce = [];
@@ -303,6 +336,25 @@ export class HandoffCall {
     for (const track of this.localStream?.getAudioTracks() || []) track.enabled = !this.muted;
   }
 
+  async reviveLocalAudio() {
+    if (this.closed) return this.localStream;
+    const live = this.localStream?.getAudioTracks().some((track) => track.readyState === "live");
+    if (live) return this.localStream;
+    this.localStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true },
+      video: false,
+    });
+    const track = this.localStream.getAudioTracks()[0];
+    const sender = this.pc?.getSenders().find((item) => item.track?.kind === "audio" || item.track == null);
+    if (track && sender) {
+      try { await sender.replaceTrack(track); } catch {}
+    } else if (track && this.pc) {
+      this.pc.addTrack(track, this.localStream);
+    }
+    if (this.muted) this.setMuted(true);
+    return this.localStream;
+  }
+
   async hangup() {
     if (this.closed) return;
     try {
@@ -378,8 +430,11 @@ export class HandoffCall {
     }).catch(() => {});
   }
 
-  #listen() {
-    if (this.captureCaptions) this.#captionStream(this.localStream, this.role);
+  async #listen() {
+    if (!this.captureCaptions || this.localCaptioned || this.closed) return;
+    this.localCaptioned = true;
+    try { await this.reviveLocalAudio(); } catch {}
+    this.#captionStream(this.localStream, this.role);
   }
 
   #captionStream(stream, role) {
@@ -390,6 +445,7 @@ export class HandoffCall {
       line: this.line,
       sessionId: this.sessionId,
       captionKey: this.captionKey,
+      reviveStream: role === this.role ? () => this.reviveLocalAudio() : null,
       enqueueUpload: (task) => {
         this.captionQueue = this.captionQueue.then(task);
       },

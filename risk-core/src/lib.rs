@@ -49,6 +49,8 @@ pub struct CallerContext {
     pub caller_name: Option<String>,
     pub claimed_company: Option<String>,
     #[serde(default)]
+    pub reference: Option<String>,
+    #[serde(default)]
     pub known_contact: bool,
     #[serde(default)]
     pub verified_reference: bool,
@@ -147,19 +149,30 @@ pub fn evaluate(context: &CallerContext) -> RiskDecision {
     // The agent is the judge. With no classification yet, fail closed: no transfer.
     let risk_level = context.risk_level.unwrap_or(RiskLevel::Amber);
 
-    let allowed_actions = match risk_level {
-        RiskLevel::Green => vec![
+    let allowed_actions = match context.risk_level {
+        None => vec![
+            AllowedAction::AskForVerification,
+            AllowedAction::TakeMessage,
+            AllowedAction::EndCall,
+        ],
+        Some(RiskLevel::Green) => vec![
             AllowedAction::AnswerEnquiry,
             AllowedAction::TakeMessage,
             AllowedAction::Transfer,
             AllowedAction::EndCall,
         ],
-        RiskLevel::Amber => vec![
-            AllowedAction::AskForVerification,
-            AllowedAction::TakeMessage,
-            AllowedAction::EndCall,
-        ],
-        RiskLevel::Red => vec![
+        Some(RiskLevel::Amber) => {
+            let mut actions = vec![
+                AllowedAction::AskForVerification,
+                AllowedAction::TakeMessage,
+                AllowedAction::EndCall,
+            ];
+            if amber_ready_to_transfer(context) {
+                actions.insert(1, AllowedAction::Transfer);
+            }
+            actions
+        }
+        Some(RiskLevel::Red) => vec![
             AllowedAction::SafeRefusal,
             AllowedAction::BoundedDistraction,
         ],
@@ -168,10 +181,11 @@ pub fn evaluate(context: &CallerContext) -> RiskDecision {
     let proposed_action_allowed = context
         .proposed_action
         .map(|action| allowed_actions.contains(&action));
-    let next_step = match risk_level {
-        RiskLevel::Green => "Say you will put them through, then invoke transfer_to_human in the browser demo or transfer_to_number on a phone call. Never invoke end_call. If neither transfer tool is available, stay on the line and find someone; do not ask another booking question.".to_owned(),
-        RiskLevel::Amber => "Ask exactly one permitted verification question, then assess again; do not transfer.".to_owned(),
-        RiskLevel::Red => red_stall_next_step(&context.transcript),
+    let next_step = match context.risk_level {
+        None => "Ask exactly one permitted verification question; do not transfer until you have classified this caller.".to_owned(),
+        Some(RiskLevel::Green) => "Say you will put them through, then invoke transfer_to_human in the browser demo or transfer_to_number on a phone call. Never invoke end_call. If neither transfer tool is available, stay on the line and find someone; do not ask another booking question.".to_owned(),
+        Some(RiskLevel::Amber) => amber_next_step(context),
+        Some(RiskLevel::Red) => red_stall_next_step(&context.transcript),
     };
     let reasons = match risk_level {
         RiskLevel::Green => {
@@ -191,6 +205,32 @@ pub fn evaluate(context: &CallerContext) -> RiskDecision {
         proposed_action_allowed,
         next_step,
         reasons,
+    }
+}
+
+fn present(value: &Option<String>) -> bool {
+    value.as_ref().is_some_and(|item| !item.trim().is_empty())
+}
+
+fn amber_ready_to_transfer(context: &CallerContext) -> bool {
+    let has_name = present(&context.caller_name);
+    let has_company = present(&context.claimed_company);
+    let has_reference = present(&context.reference);
+    let business = context.business_caller || has_company;
+    has_name && (!business || (has_company && has_reference))
+}
+
+fn amber_next_step(context: &CallerContext) -> String {
+    const HANDOFF: &str = "Say you will put them through, then invoke transfer_to_human in the browser demo or transfer_to_number on a phone call. Never invoke end_call. Do not discuss, confirm, or collect bank, account, or invoice numbers.";
+    let business = context.business_caller || present(&context.claimed_company);
+    if amber_ready_to_transfer(context) {
+        HANDOFF.to_owned()
+    } else if !present(&context.caller_name) {
+        "Ask only for the caller's name. Do not transfer yet, and do not discuss bank details.".to_owned()
+    } else if business && !present(&context.claimed_company) {
+        "Ask only for the company name. Do not transfer yet, and do not discuss bank details.".to_owned()
+    } else {
+        "Ask only for a reference number, such as an invoice, PO, account, or ticket reference. Do not transfer yet, and do not discuss bank details.".to_owned()
     }
 }
 
@@ -222,7 +262,7 @@ pub fn recommendation(signal: RiskSignal) -> &'static str {
             "Do not disclose protected information; take a message instead."
         }
         RiskSignal::UnverifiedBusinessCaller => {
-            "Verify the business caller and reference before any handoff."
+            "Take the caller's name and company, then hand off; do not handle bank or invoice details yourself."
         }
     }
 }
@@ -369,5 +409,42 @@ mod tests {
         assert_eq!(decision.risk_level, RiskLevel::Amber);
         assert!(!decision.transfer_allowed);
         assert_eq!(decision.proposed_action_allowed, Some(false));
+        assert!(decision.next_step.contains("name"));
+        assert!(decision.next_step.contains("Do not transfer yet"));
+    }
+
+    #[test]
+    fn business_amber_without_a_reference_stays_on_the_line() {
+        let mut input = context(
+            RiskLevel::Amber,
+            "it's Pruya from Loreal calling about your account",
+            Some(AllowedAction::Transfer),
+        );
+        input.caller_name = Some("Pruya".to_owned());
+        input.claimed_company = Some("Loreal".to_owned());
+        input.business_caller = true;
+        let decision = evaluate(&input);
+        assert!(!decision.transfer_allowed);
+        assert!(decision.next_step.contains("reference"));
+        assert!(decision.next_step.contains("Do not transfer yet"));
+    }
+
+    #[test]
+    fn screened_amber_bank_caller_may_transfer() {
+        let mut input = context(
+            RiskLevel::Amber,
+            "Need to talk about bank details for an invoice",
+            Some(AllowedAction::Transfer),
+        );
+        input.caller_name = Some("Morgan".to_owned());
+        input.claimed_company = Some("North Star Hair Supply".to_owned());
+        input.reference = Some("NS-204".to_owned());
+        input.business_caller = true;
+        let decision = evaluate(&input);
+        assert_eq!(decision.risk_level, RiskLevel::Amber);
+        assert!(decision.transfer_allowed);
+        assert_eq!(decision.proposed_action_allowed, Some(true));
+        assert!(decision.next_step.contains("put them through"));
+        assert!(decision.next_step.contains("bank"));
     }
 }

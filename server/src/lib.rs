@@ -217,7 +217,10 @@ async fn conversations(
                 item["policy"] = json!({
                     "risk_level": summary.risk_level,
                     "signals": summary.signals,
-                    "transfer_allowed": summary.risk_level == RiskLevel::Green,
+                    "transfer_allowed": matches!(
+                        summary.risk_level,
+                        RiskLevel::Green | RiskLevel::Amber
+                    ),
                 });
             }
         }
@@ -1030,14 +1033,15 @@ mod tests {
         let response = test_app().await.oneshot(
             Request::post("/tool/assess")
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"call_id":"test-2","risk_level":"amber","claimed_company":"North Star Hair Supply","business_caller":true,"known_contact":true,"verified_reference":true,"requested_action":"speak to the owner about a delivery","proposed_action":"transfer"}"#))
+                .body(Body::from(r#"{"call_id":"test-2","risk_level":"amber","caller_name":"Morgan","claimed_company":"North Star Hair Supply","reference":"NS-204","business_caller":true,"known_contact":true,"verified_reference":true,"requested_action":"speak to the owner about a delivery","proposed_action":"transfer"}"#))
                 .unwrap(),
         ).await.unwrap();
         let body: Value =
             serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
                 .unwrap();
         assert_eq!(body["risk_level"], "amber");
-        assert_eq!(body["transfer_allowed"], false);
+        assert_eq!(body["transfer_allowed"], true);
+        assert_eq!(body["proposed_action_allowed"], true);
     }
 
     #[tokio::test]

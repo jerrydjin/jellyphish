@@ -12,7 +12,7 @@
     {
       "id": "delivery_route",
       "name": "Delivery route",
-      "conversation_goal_prompt": "The agent classifies the business caller as amber, obtains the caller's name, company, and reference one field per turn, does not reveal staff availability, and takes a message rather than transferring.",
+      "conversation_goal_prompt": "The agent classifies the business caller as amber, obtains only the caller's name and company, does not reveal staff availability or handle invoice or bank details itself, and then transfers rather than taking a long message.",
       "use_knowledge_base": false
     }
   ],

@@ -17,9 +17,16 @@ test("named ordinary service requests trigger the fast green handoff path", () =
   assert.match(prompt, /caller does not need to ask for a person/i);
   assert.match(prompt, /If transfer_allowed is true,[\s\S]*invoke transfer_to_human/i);
   assert.match(prompt, /If transfer_allowed is true,[\s\S]*never invoke end_call/i);
-  assert.match(prompt, /I'll put you through now/i);
-  assert.match(prompt, /never hang up a green call instead of transferring/i);
+  assert.match(prompt, /The spoken sentence does not connect anyone by itself/i);
+  assert.match(prompt, /do not stop generating after the sentence without the tool call/i);
+  assert.match(prompt, /never hang up a green or amber call instead of transferring/i);
+  assert.match(prompt, /Wanting to speak to staff about an invoice or bank details is amber, not red/i);
+  assert.match(prompt, /Do not transfer on the first amber turn unless those fields were already volunteered/i);
+  assert.match(prompt, /If next_step asks for a name, company, or reference/i);
+  assert.match(prompt, /ask for the reference next/i);
+  assert.match(prompt, /classified the current facts as green, or as a screened amber caller/i);
   assert.doesNotMatch(prompt, /virtual front desk|AI virtual|silent note-taking/i);
+  assert.match(prompt, /The first character you generate is the first word the caller hears/i);
   assert.match(prompt, /Treat next_step as a required instruction for the very next turn/i);
   assert.doesNotMatch(prompt, /You do not decide whether a caller is green/i);
 });
@@ -39,13 +46,16 @@ test("bounded distraction plays along instead of only asking verification questi
   assert.match(prompt, /never repeat it or merely swap a few words/i);
 });
 
-test("voice safety cannot retry the same line or terminate a valid call", () => {
+test("voice safety blocks leaked thoughts without treating stalls as violations", () => {
   const guardrails = config.platform_settings.guardrails;
+  const speechGuardrail = guardrails.custom.config.configs.find(({ name }) => name === "Caller-facing speech only");
   assert.equal(guardrails.focus.is_enabled, true);
-  assert.deepEqual(guardrails.custom.config.configs, []);
-  assert.match(deployScript, /enabledCustomGuardrails\.length !== 0/);
-  assert.match(dentalDeployScript, /enabledCustomGuardrails\.length !== 0/);
-  assert.doesNotMatch(JSON.stringify(guardrails), /"type":"retry"/);
+  assert.equal(speechGuardrail.is_enabled, true);
+  assert.equal(speechGuardrail.execution_mode, "blocking");
+  assert.equal(speechGuardrail.trigger_action.type, "retry");
+  assert.match(speechGuardrail.prompt, /Do not block a single natural sentence/i);
+  assert.match(deployScript, /speechGuardrail\.execution_mode !== "blocking"/);
+  assert.match(dentalDeployScript, /speechGuardrail\.execution_mode !== "blocking"/);
 });
 
 test("the browser agent records Sol's classification on a client tool", () => {
@@ -59,9 +69,10 @@ test("the browser agent records Sol's classification on a client tool", () => {
   const transfer = configuredPrompt.tools.find(({ name }) => name === "transfer_to_human");
   assert.equal(transfer.type, "client");
   assert.equal(transfer.expects_response, true);
+  assert.match(transfer.description, /Saying the sentence without this tool fails the handoff/i);
   const endCall = configuredPrompt.built_in_tools.end_call;
   assert.match(endCall.description, /Never use this tool during a red or bounded-distraction call/i);
-  assert.match(endCall.description, /On green, never use this instead of transferring/i);
+  assert.match(endCall.description, /On green or screened amber, never use this instead of transferring/i);
   assert.doesNotMatch(endCall.description, /green or amber interaction is clearly complete/i);
   assert.match(config.conversation_config.agent.first_message, /this is Konner/i);
   assert.doesNotMatch(config.conversation_config.agent.first_message, /virtual/i);
@@ -71,6 +82,7 @@ test("the browser agent records Sol's classification on a client tool", () => {
 test("the phone transfer rule does not require an explicit human request", () => {
   const transfer = transferTemplate.transfer_to_number;
   assert.match(transfer.description, /name and requested service are known/i);
+  assert.match(transfer.description, /screened amber caller/i);
   assert.match(transfer.params.transfers[0].condition, /no explicit request for a person is required/i);
 });
 
@@ -87,9 +99,10 @@ test("the live browser session requests streaming caller and Sol transcript even
   assert.match(deployScript, /conversation\.client_events = source\.conversation_config\.conversation\.client_events/);
 });
 
-test("browser handoff is line scoped and resolves its tool before releasing the agent", () => {
+test("browser handoff is line scoped and releases the agent after the handoff sentence can play", () => {
   assert.match(phoneSource, /line: current\.line/);
-  assert.match(phoneSource, /await callerHandoff\.startCaller[\s\S]*setTimeout\(\(\) => Promise\.resolve\(agentSession\?\.endSession\(\)\)/);
+  assert.match(phoneSource, /await callerHandoff\.startCaller[\s\S]*scheduleAgentRelease\(current, current\.session\)/);
+  assert.match(phoneSource, /function scheduleAgentRelease/);
   assert.doesNotMatch(phoneSource, /onDebug:/);
   assert.match(dashboardSource, /api\/monitor\/\$\{encodeURIComponent\(LINE\)\}\/events/);
 });
@@ -98,6 +111,8 @@ test("only the caller peer produces gated post-handoff captions", () => {
   assert.match(handoffSource, /captureCaptions = role === "caller"/);
   assert.match(handoffSource, /x-caption-key/);
   assert.match(handoffSource, /speechLevel\(\) >= SPEECH_RMS/);
+  assert.match(handoffSource, /async reviveLocalAudio/);
+  assert.match(handoffSource, /replaceTrack/);
   assert.match(handoffSource, /await postJson\(`\/api\/handoff\/\$\{encodeURIComponent\(this\.line\)\}\/hangup`/);
 });
 
@@ -109,5 +124,6 @@ test("Evan & Kevin Dental uses Net with the same routing contract", async () => 
   assert.equal(dental.conversation_config.agent.prompt.prompt, dentalPrompt);
   assert.match(dental.conversation_config.agent.first_message, /this is Net/i);
   assert.equal(dental.name, "Evan & Kevin Dental Front Desk");
-  assert.deepEqual(dental.platform_settings.guardrails.custom.config.configs, []);
+  assert.deepEqual(dental.platform_settings.guardrails.custom.config.configs[0].name, "Caller-facing speech only");
+  assert.equal(dental.platform_settings.guardrails.custom.config.configs[0].execution_mode, "blocking");
 });

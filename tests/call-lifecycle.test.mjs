@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   applyLiveTurn,
+  callerFacingSpeech,
+  isStaffHandoffSpeech,
   conversationListFingerprint,
   effectiveConversationStatus,
   handoffSidecarTranscript,
@@ -19,6 +21,16 @@ test("an ended browser session overrides lagging remote statuses", () => {
   assert.equal(effectiveConversationStatus({ id: "conv-1", status: "in-progress" }, "conv-1"), "done");
   assert.equal(effectiveConversationStatus({ id: "conv-1", status: "processing" }, "conv-1"), "done");
   assert.equal(effectiveConversationStatus({ id: "conv-2", status: "in-progress" }, "conv-1"), "in-progress");
+});
+
+test("staff handoff speech is recognized even without the transfer tool", () => {
+  assert.equal(isStaffHandoffSpeech("I'll put you through now."), true);
+  assert.equal(isStaffHandoffSpeech("I’ll put you through now"), true);
+  assert.equal(isStaffHandoffSpeech("I'll put you through."), true);
+  assert.equal(isStaffHandoffSpeech("I will put you through now"), true);
+  assert.equal(isStaffHandoffSpeech("One moment, I'll just find someone for you."), true);
+  assert.equal(isStaffHandoffSpeech("Can I take a message?"), false);
+  assert.equal(isStaffHandoffSpeech("What's your reference number?"), false);
 });
 
 test("the timer freezes at the local disconnect time", () => {
@@ -247,6 +259,35 @@ test("a later Sol reply does not overwrite the opening line", () => {
   );
 });
 
+test("internal thoughts are stripped from spoken and live transcript text", () => {
+  assert.equal(
+    callerFacingSpeech("Sure, I can help with that. The caller provided a remote access request so this call is red."),
+    "Sure, I can help with that.",
+  );
+  assert.equal(callerFacingSpeech("I am still in RED tarpit mode."), "");
+  assert.equal(callerFacingSpeech("Could you spell the company name?"), "Could you spell the company name?");
+  assert.equal(
+    callerFacingSpeech("Oh my, patient records, you say? Let me check the client hair-folio section."),
+    "Oh my, patient records, you say? Let me check the client hair-folio section.",
+  );
+  assert.deepEqual(
+    normalizeIncomingSocketEvent({
+      type: "internal_tentative_agent_response",
+      tentative_agent_response_internal_event: {
+        tentative_agent_response: "One moment. I will now call the assessment tool with risk_level red.",
+      },
+    }),
+    { role: "agent", message: "One moment.", eventId: "tentative-agent", pending: true },
+  );
+  assert.equal(
+    normalizeIncomingSocketEvent({
+      type: "agent_response",
+      agent_response_event: { agent_response: "I am still in RED tarpit mode.", event_id: 44 },
+    }),
+    null,
+  );
+});
+
 test("tool-call JSON is not shown as spoken Sol text", () => {
   assert.equal(
     normalizeIncomingSocketEvent({
@@ -345,6 +386,27 @@ test("caller previews keep a short name and request for the incoming staff line"
   const { callerPreviewFromTurns } = await import("../web/handoff-call.mjs");
   assert.deepEqual(callerPreviewFromTurns([{ role: "user", message: "Hi, my name is Jamie and I would like a haircut tomorrow" }]), {
     callerName: "Jamie",
+    claimedCompany: "",
+    reference: "",
     requestedAction: "Hi, my name is Jamie and I would like a haircut tomorrow",
   });
+  const loreal = callerPreviewFromTurns([{
+    role: "user",
+    message: "it's pruya from loreal business calling about your account",
+  }]);
+  assert.equal(loreal.callerName, "Pruya");
+  assert.match(loreal.claimedCompany, /loreal/i);
+  assert.equal(loreal.reference, "");
+  assert.equal(
+    callerPreviewFromTurns([{ role: "user", message: "I'm Morgan from North Star Hair Supply about an invoice" }]).callerName,
+    "Morgan",
+  );
+  assert.match(
+    callerPreviewFromTurns([{ role: "user", message: "I'm Morgan from North Star Hair Supply about an invoice" }]).claimedCompany,
+    /North Star Hair Supply/i,
+  );
+  assert.equal(
+    callerPreviewFromTurns([{ role: "user", message: "Reference NS-204 from North Star" }]).reference,
+    "NS-204",
+  );
 });
