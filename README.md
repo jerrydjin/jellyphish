@@ -1,8 +1,10 @@
 <p align="center"><img src="jellyphis-icon-white.png" alt="Jellyphish icon" width="160" /></p>
 
-# Jellyphish — managed voice, agent-judged routing
+# Jellyphish
 
-Jellyphish is a screened AI front desk for small businesses. ElevenLabs owns realtime voice and call controls; Sol silently classifies each caller as green, amber, or red. A Rust service records that judgment, stores events, and serves a small operator console.
+An AI front desk for small businesses that screens callers before they reach a human.
+
+An ElevenLabs voice agent answers the call and rates the caller green, amber, or red. A Rust service records that rating, decides which actions are allowed (only safe callers get transferred), and serves a live operator dashboard.
 
 ```text
 ElevenLabs voice agent (classifies the call)
@@ -14,108 +16,61 @@ SQLite event store + post-call summaries
 small operator dashboard
 ```
 
-Sol is the judge. Before a transfer it records its current `risk_level` with `assess_call`; the Rust response echoes allowed actions for that route. If the assessment tool is unavailable, the prompt fails safely to taking a message.
+If you're seeing this, our product should be on a live server.
 
-## Repository map
-
-- `risk-core/` — route types and the action list for an agent-supplied green/amber/red judgment.
-- `server/` — Axum routes, SQLite event store, ElevenLabs client, signed webhooks, SSE monitoring, and static dashboard hosting.
-- `web/` — intentionally plain HTML/CSS/JavaScript operator console.
-- `tools/` — ElevenLabs webhook-tool templates for `assess_call` and `finish_call`.
-- `elevenlabs-agent.json` and `agent-prompt.md` — Barbershop (Konner) voice-agent configuration.
-- `elevenlabs-agent-dental.json` and `agent-prompt-dental.md` — Evan & Kevin Dental (Net) voice-agent configuration.
-- `tests/*.json` — ElevenLabs conversation simulation scenarios.
-
-## Run locally
-
-Copy `.env.example` to `.env`, add a restricted ElevenLabs API key, then run:
+## Quick start
 
 ```sh
+cp .env.example .env        # add a restricted ElevenLabs API key
 cargo +stable run -p jellyphish-server
 ```
 
-Open the Barbershop inbound console at <http://localhost:4173>, or Evan & Kevin Dental at <http://localhost:4173/dental/>. Open the caller's phone at <http://localhost:4173/phone/> in a second window. Tap **Barbershop** or **Evan & Kevin Dental**, then **call**, and allow microphone access. The call appears live on that business's dashboard. When the assistant hands a screened caller to a human, the dashboard staff line rings; answer there and the assistant goes silent. The database is created at `data/jellyphish.db`.
+| Page                  | URL                              |
+| --------------------- | -------------------------------- |
+| Barbershop dashboard  | <http://localhost:4173>          |
+| Dental dashboard      | <http://localhost:4173/dental/>  |
+| Caller phone          | <http://localhost:4173/phone/>   |
 
-The phone simulator owns the realtime ElevenLabs session, just like a real caller. It publishes each call snapshot (status, caller number, mute state, transcript) to `POST /api/live/{line}`, and every dashboard for that line mirrors it over `GET /api/live/{line}/events` (SSE). Human handoff rooms and monitor events are also isolated by line. The caller browser is the sole post-handoff caption producer: voice activity gates bounded Scribe uploads, and a per-call capability prevents unrelated clients from injecting captions. Barbershop answers on `studio-sol`; dental answers on `dental-clinic` once `ELEVENLABS_DENTAL_AGENT_ID` is set. Other contacts ring out with no answer. The microphone requires a secure origin, so a real handset needs HTTPS (for example an ngrok URL) rather than a LAN IP. A phone number is required only for a real `transfer_to_number` call.
+Open the phone in a second window, pick a business, and call. The call shows up live on that business's dashboard, and when the agent hands off, the staff line rings there. Using a real handset needs HTTPS (e.g. ngrok) for microphone access.
 
-## Core API
+## Layout
 
-### `GET /healthz`
+| Path                    | What it is                                              |
+| ----------------------- | ------------------------------------------------------- |
+| `server/`               | Axum API, SQLite store, webhooks, live SSE, dashboard   |
+| `risk-core/`            | Risk levels and the actions each one allows             |
+| `web/`                  | Plain HTML/JS dashboards and phone simulator            |
+| `tools/`                | ElevenLabs tool templates (`assess_call`, `finish_call`) |
+| `agent-prompt*.md`, `elevenlabs-agent*.json` | Agent configs (Barbershop, Dental) |
+| `scripts/`              | Deploy prompts and attach tools to live agents          |
+| `tests/`                | Node tests and conversation scenarios                   |
 
-Reports service and integration readiness without exposing secrets.
+## Key endpoints
 
-### `POST /tool/assess`
+- `GET /healthz`: service and integration status
+- `POST /tool/assess`: the agent reports its risk level and gets back the allowed actions
+- `POST /tool/finish`: stores the final rating and a call summary
+- `POST /webhooks/elevenlabs/post-call`: signed post-call webhook
 
-Accepts the agent's current `CallerContext`, including its `risk_level`. The response is the action list for that route:
-
-```json
-{
-  "call_id": "conv_demo",
-  "risk_level": "red",
-  "requested_action": "Install TeamViewer so support can access the till",
-  "proposed_action": "transfer"
-}
-```
-
-```json
-{
-  "risk_level": "red",
-  "signals": [],
-  "allowed_actions": ["safe_refusal", "bounded_distraction", "end_call"],
-  "transfer_allowed": false,
-  "proposed_action_allowed": false,
-  "reasons": ["The agent classified this caller as high risk."]
-}
-```
-
-### `POST /tool/finish`
-
-Stores the agent's classification and a concise summary.
-
-### `POST /webhooks/elevenlabs/post-call`
-
-Validates `ElevenLabs-Signature: t=<unix>,v0=<hmac>`, stores an idempotent event metadata record, and writes a summary using the agent's collected `route`. Full audio/transcripts remain in ElevenLabs rather than being copied into the event log.
-
-The existing monitored-handoff contract remains at `/api/webhooks/*`; see [MONITORED_HANDOFF.md](./MONITORED_HANDOFF.md).
+Human handoff webhooks are documented in [MONITORED_HANDOFF.md](./MONITORED_HANDOFF.md).
 
 ## Tests
 
 ```sh
-cargo +stable fmt --all -- --check
 cargo +stable test --workspace
 cargo +stable clippy --workspace --all-targets -- -D warnings
 node --test tests/call-lifecycle.test.mjs tests/agent-routing.test.mjs
 ```
 
-The tests cover ordinary, unverified supplier, and high-risk transfer decisions; every high-risk class; HMAC validation; and the HTTP assessment contract.
-
-## ElevenLabs setup
-
-Deploy prompt and voice-safety changes to the live agent with:
+## Deploying agents
 
 ```sh
 node scripts/deploy-agent-safety.mjs
 node scripts/deploy-dental-agent.mjs
-```
-
-The agents keep ElevenLabs Focus enabled and a blocking caller-facing speech guardrail. That guardrail only retries when the model appends internal thought; ordinary stall sentences are allowed so a false positive cannot loop and drop the call.
-
-Webhook tools call external APIs, while `transfer_to_number` and `end_call` remain ElevenLabs system tools. To attach the two policy tools to the live agent, expose this server on a public HTTPS origin and run:
-
-```sh
 PUBLIC_BASE_URL=https://your-origin.example node scripts/apply-policy-tools.mjs
+node scripts/apply-transfer.mjs   # only once a real E.164 number exists
 ```
 
-Then apply the transfer template only after a real E.164 teammate destination exists:
+Point the ElevenLabs post-call webhook at `/webhooks/elevenlabs/post-call` and set `ELEVENLABS_WEBHOOK_SECRET`.
 
-```sh
-node scripts/apply-transfer.mjs
-```
-
-Configure the workspace post-call transcription webhook to send to `/webhooks/elevenlabs/post-call` and put its generated secret in `ELEVENLABS_WEBHOOK_SECRET`.
-
-## Deliberate boundaries
-
-This repository does not include a Rust/WASM frontend, microservices, Kubernetes, a custom WebRTC stack, or Postgres. SQLite is enough for the demo. A later multi-tenant deployment can move persistence behind the same `EventStore` boundary.
-
-A browser demo session cannot perform a real phone transfer. Conference transfer requires an ElevenLabs-compatible Twilio or SIP number and a real destination. The current prompt and transfer template require a fresh Rust approval before transfer, but ElevenLabs still executes the system tool; production assurance should also use platform guardrails and live integration testing.
+> **Note:** A browser session can't make a real phone transfer. That needs a Twilio or SIP number connected to ElevenLabs.
