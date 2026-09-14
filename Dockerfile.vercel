@@ -1,0 +1,18 @@
+FROM rust:1-bookworm AS build
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY risk-core ./risk-core
+COPY server ./server
+RUN cargo build --release -p jellyphish-server
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build /app/target/release/jellyphish-server /usr/local/bin/server
+COPY web ./web
+ENV PORT=80 \
+    WEB_ROOT=/app/web \
+    DATABASE_URL=sqlite:///tmp/jellyphish.db
+ENTRYPOINT ["/usr/local/bin/server"]

@@ -1,0 +1,14 @@
+.git
+.github
+.cursor
+.DS_Store
+.env
+.env.*
+!.env.example
+target
+data
+video
+evidence
+*.md
+node_modules
+web/icons/.DS_Store

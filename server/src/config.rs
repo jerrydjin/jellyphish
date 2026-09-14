@@ -17,14 +17,11 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
-        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
         Ok(Self {
-            bind: std::env::var("BIND_ADDR")
-                .unwrap_or_else(|_| "127.0.0.1:4173".to_owned())
-                .parse()?,
+            bind: listen_addr()?,
             database_url: std::env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite://data/jellyphish.db".to_owned()),
-            web_root: repo_root.join("web"),
+            web_root: web_root(),
             elevenlabs_api_key: non_empty("ELEVENLABS_API_KEY"),
             elevenlabs_agent_id: std::env::var("ELEVENLABS_AGENT_ID")
                 .unwrap_or_else(|_| "agent_1101m2b4acdnedz9y2yky3w9vwfm".to_owned()),
@@ -35,6 +32,22 @@ impl Config {
             human_transfer_number: non_empty("HUMAN_TRANSFER_NUMBER"),
         })
     }
+}
+
+fn listen_addr() -> anyhow::Result<SocketAddr> {
+    if let Some(bind) = non_empty("BIND_ADDR") {
+        return Ok(bind.parse()?);
+    }
+    if let Some(port) = non_empty("PORT") {
+        return Ok(format!("0.0.0.0:{port}").parse()?);
+    }
+    Ok("127.0.0.1:4173".parse()?)
+}
+
+fn web_root() -> PathBuf {
+    non_empty("WEB_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../web"))
 }
 
 fn non_empty(name: &str) -> Option<String> {

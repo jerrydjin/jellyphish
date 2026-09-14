@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
 use std::{
+    path::Path,
     str::FromStr,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -27,9 +28,7 @@ pub struct CallSummary {
 
 impl EventStore {
     pub async fn connect(database_url: &str) -> anyhow::Result<Self> {
-        if database_url.starts_with("sqlite://data/") {
-            std::fs::create_dir_all("data")?;
-        }
+        ensure_sqlite_parent(database_url)?;
         let options = sqlx::sqlite::SqliteConnectOptions::from_str(database_url)?
             .create_if_missing(true)
             .foreign_keys(true);
@@ -162,4 +161,22 @@ pub fn now_millis() -> i64 {
 
 fn bounded(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
+}
+
+fn ensure_sqlite_parent(database_url: &str) -> anyhow::Result<()> {
+    let Some(path) = database_url
+        .strip_prefix("sqlite://")
+        .or_else(|| database_url.strip_prefix("sqlite:"))
+    else {
+        return Ok(());
+    };
+    if path == ":memory:" || path.starts_with("memory") {
+        return Ok(());
+    }
+    if let Some(parent) = Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    Ok(())
 }
