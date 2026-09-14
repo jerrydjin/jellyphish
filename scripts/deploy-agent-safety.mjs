@@ -86,8 +86,10 @@ if (
   deployedEndCall?.description !== endCallDescription ||
   deployedAssessment?.type !== "client" ||
   deployedAssessment?.expects_response !== true ||
+  deployedAssessment?.interruption_mode !== "disable_during_tool_and_turn" ||
   deployedTransfer?.type !== "client" ||
   deployedTransfer?.expects_response !== true ||
+  deployedTransfer?.interruption_mode !== "disable_during_tool_and_turn" ||
   deployedEvents.includes("agent_chat_response_part") ||
   !["tentative_user_transcript", "internal_tentative_agent_response", "agent_response"].every((name) => deployedEvents.includes(name))
 ) {
@@ -95,4 +97,4 @@ if (
 }
 
 const hash = crypto.createHash("sha256").update(deployedPrompt).digest("hex").slice(0, 12);
-console.log(`Deployed and verified ${agentId}: prompt ${hash}, routing tools on, Focus on, caller-facing speech guardrail on.`);
+console.log(`Deployed and verified ${agentId}: prompt ${hash}, routing tools protected from interruptions, Focus on, caller-facing speech guardrail on.`);

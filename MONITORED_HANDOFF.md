@@ -14,7 +14,9 @@ Caller -> ElevenLabs -> conference transfer -> human
                                                +-> SSE dashboard alert
 ```
 
-Browser demos use a second path: after the assistant gives the disclosure and calls `transfer_to_human`, the caller tab posts a WebRTC offer to `/api/handoff/{line}/ring`. The operator console for that business line rings like a staff line. Answering connects caller audio to the human, and live caller/staff speech writes into the same transcript panel. Handoff state and events are isolated by line, so the dental and barbershop consoles cannot answer one another's calls.
+Browser demos use a second path: after the assistant gives the disclosure and calls `transfer_to_human`, the caller tab posts a WebRTC offer to `/api/handoff/{line}/ring`. The operator console for that business line rings like a staff line. Answering connects the handoff and starts one post-handoff recorder on the operator console. Its explicit Caller/Staff selector labels each utterance before uploading it into the shared transcript. Handoff state and events are isolated by line, so the dental and barbershop consoles cannot answer one another's calls.
+
+For a same-device demo, remain on the operator console after pickup. Select Caller before speaking the caller's line and Staff before speaking the staff line. The caller tab does not run a second caption recorder, and both WebRTC playback elements are muted, avoiding the same microphone being captured and echoed through two tabs. This explicit half-duplex role selection is a demo convenience, not a carrier-grade monitor.
 
 ## Webhook contract
 
@@ -38,7 +40,7 @@ Local demo endpoints do not require HMAC:
 - `POST /api/handoff/{line}/ring`: SDP offer plus caller preview and a per-call caption capability
 - `POST /api/handoff/{line}/signal`: SDP answer or ICE
 - `POST /api/handoff/{line}/transcript`: live caller/staff speech; requires the caption capability and a connected or just-ended room
-- `POST /api/handoff/{line}/transcribe`: bounded speech audio; requires the caption capability and a connected or just-ended room
+- `POST /api/handoff/{line}/transcribe`: bounded speech audio; requires a participant caption capability and a connected or just-ended room; the connected staff console may label its demo mic as caller or staff
 - `POST /api/handoff/{line}/hangup`
 - `GET /api/monitor/{line}/events`: line-scoped operator event stream
 - `GET /api/handoff/{line}/{id}`

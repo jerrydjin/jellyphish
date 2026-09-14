@@ -105,12 +105,24 @@ test("browser handoff is line scoped and releases the agent after the handoff se
   assert.match(phoneSource, /function scheduleAgentRelease/);
   assert.doesNotMatch(phoneSource, /onDebug:/);
   assert.match(dashboardSource, /api\/monitor\/\$\{encodeURIComponent\(LINE\)\}\/events/);
+  const tools = config.conversation_config.agent.prompt.tools;
+  assert.equal(tools.find(({ name }) => name === "assess_call_browser")?.interruption_mode, "disable_during_tool_and_turn");
+  assert.equal(tools.find(({ name }) => name === "transfer_to_human")?.interruption_mode, "disable_during_tool_and_turn");
 });
 
-test("only the caller peer produces gated post-handoff captions", () => {
-  assert.match(handoffSource, /captureCaptions = role === "caller"/);
+test("the staff console owns same-device post-handoff captions", () => {
+  assert.match(handoffSource, /captureCaptions = true/);
+  assert.match(handoffSource, /caption_key: this\.captionKey/);
+  assert.match(phoneSource, /captureCaptions: false/);
+  assert.match(dashboardSource, /captionRole: \(\) => handoffSpeakerRole/);
+  assert.match(dashboardSource, /isCaptureActive: \(\) => true/);
+  assert.doesNotMatch(phoneSource, /BroadcastChannel\("jellyphish-handoff-speaker"\)/);
+  assert.match(phoneSource, /id="handoff-remote" autoplay playsinline muted/);
+  assert.match(dashboardSource, /id="handoff-remote" autoplay playsinline muted/);
   assert.match(handoffSource, /x-caption-key/);
   assert.match(handoffSource, /speechLevel\(\) >= SPEECH_RMS/);
+  assert.match(handoffSource, /const roleChanged = getRole\(\) !== roleAtStart/);
+  assert.doesNotMatch(handoffSource, /!speechDetected \|\| blob\.size/);
   assert.match(handoffSource, /async reviveLocalAudio/);
   assert.match(handoffSource, /replaceTrack/);
   assert.match(handoffSource, /await postJson\(`\/api\/handoff\/\$\{encodeURIComponent\(this\.line\)\}\/hangup`/);

@@ -17,6 +17,7 @@
             "type": "client",
             "name": "assess_call_browser",
             "description": "Record Konner's silent classification for the operator console and return the allowed actions for that route. Konner decides green, amber, or red. Call whenever the route changes and before every handoff.",
+            "interruption_mode": "disable_during_tool_and_turn",
             "expects_response": true,
             "response_timeout_secs": 5,
             "parameters": {
@@ -97,6 +98,7 @@
             "type": "client",
             "name": "transfer_to_human",
             "description": "This is the only action that rings staff. Invoke on the same turn as saying 'I'll put you through now' after classifying the current facts as green or as a screened amber caller. Saying the sentence without this tool fails the handoff. After invoking, produce no further speech.",
+            "interruption_mode": "disable_during_tool_and_turn",
             "expects_response": true,
             "response_timeout_secs": 20,
             "parameters": {

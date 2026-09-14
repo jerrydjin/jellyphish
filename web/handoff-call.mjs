@@ -61,30 +61,34 @@ function recorderMime() {
   return types.find((type) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type)) || "";
 }
 
-function streamCaptions({ stream, role, line, sessionId, captionKey, enqueueUpload, onText, isClosed, reviveStream }) {
+function streamCaptions({ stream, getRole, line, sessionId, captionKey, enqueueUpload, onText, isClosed, reviveStream, isCaptureActive, sharedAudioContext }) {
   const mime = recorderMime();
-  if (!mime || !stream) return speechRecognizer(role, onText);
+  if (!mime || !stream) return speechRecognizer(getRole, onText, isCaptureActive);
   let active = true;
   let captureStream = stream;
   const AudioContext = window.AudioContext || window.webkitAudioContext;
-  let audioContext = null;
+  let audioContext = sharedAudioContext || null;
+  const ownsAudioContext = !sharedAudioContext;
+  let source = null;
   let analyser = null;
   let samples = null;
 
   function attachAnalyser(nextStream) {
     if (!AudioContext || !nextStream) return;
     try {
-      audioContext?.close?.().catch(() => {});
-      audioContext = new AudioContext();
+      source?.disconnect?.();
+      audioContext ||= new AudioContext();
       audioContext.resume?.().catch(() => {});
-      const source = audioContext.createMediaStreamSource(nextStream);
+      source = audioContext.createMediaStreamSource(nextStream);
       analyser = audioContext.createAnalyser();
       analyser.fftSize = 1024;
       analyser.smoothingTimeConstant = 0.2;
       samples = new Float32Array(analyser.fftSize);
       source.connect(analyser);
     } catch {
-      audioContext?.close?.().catch(() => {});
+      source?.disconnect?.();
+      source = null;
+      if (ownsAudioContext) audioContext?.close?.().catch(() => {});
       audioContext = null;
       analyser = null;
       samples = null;
@@ -100,7 +104,7 @@ function streamCaptions({ stream, role, line, sessionId, captionKey, enqueueUplo
     return Math.sqrt(sum / samples.length);
   }
 
-  async function recordOnce() {
+  async function recordOnce(roleAtStart) {
     const parts = [];
     let recorder;
     try {
@@ -142,7 +146,9 @@ function streamCaptions({ stream, role, line, sessionId, captionKey, enqueueUplo
         const utteranceEnded = enoughSpeech && now - lastSpeechAt >= END_SILENCE_MS;
         const idleExpired = !firstSpeechAt && now - startedAt >= MAX_IDLE_MS;
         const recordExpired = now - startedAt >= MAX_RECORD_MS;
-        if ((utteranceEnded || idleExpired || recordExpired) && recorder.state === "recording") {
+        const focusLost = isCaptureActive && !isCaptureActive();
+        const roleChanged = getRole() !== roleAtStart;
+        if ((utteranceEnded || idleExpired || recordExpired || focusLost || roleChanged) && recorder.state === "recording") {
           clearInterval(monitor);
           try { recorder.stop(); } catch { finish(); }
         }
@@ -151,7 +157,7 @@ function streamCaptions({ stream, role, line, sessionId, captionKey, enqueueUplo
     });
   }
 
-  async function upload(blob) {
+  async function upload(blob, role) {
     try {
       const response = await fetch(`/api/handoff/${encodeURIComponent(line)}/transcribe`, {
         method: "POST",
@@ -174,6 +180,10 @@ function streamCaptions({ stream, role, line, sessionId, captionKey, enqueueUplo
 
   async function cycle() {
     while (active && !isClosed?.()) {
+      if (isCaptureActive && !isCaptureActive()) {
+        await sleep(200);
+        continue;
+      }
       const tracks = captureStream.getAudioTracks();
       if (!tracks.length || tracks.every((track) => track.readyState !== "live")) {
         if (typeof reviveStream === "function") {
@@ -188,12 +198,16 @@ function streamCaptions({ stream, role, line, sessionId, captionKey, enqueueUplo
         await sleep(400);
         continue;
       }
-      const { blob, speechDetected } = await recordOnce();
+      const role = getRole();
+      const { blob } = await recordOnce(role);
       if (!active || isClosed?.()) return;
-      if (!speechDetected || blob.size < MIN_AUDIO_BYTES) continue;
+      // RMS is only a chunk-boundary hint. It is not reliable enough to decide
+      // whether a browser recording contains speech: input gain, processing,
+      // or a suspended AudioContext can all keep it below a fixed threshold.
+      if (blob.size < MIN_AUDIO_BYTES) continue;
       // Keep recording while the previous utterance is transcribed. Serializing
       // only the uploads preserves speaker order without dropping live audio.
-      enqueueUpload(() => upload(blob));
+      enqueueUpload(() => upload(blob, role));
     }
   }
 
@@ -203,12 +217,13 @@ function streamCaptions({ stream, role, line, sessionId, captionKey, enqueueUplo
     start() {},
     stop() {
       active = false;
-      audioContext?.close?.().catch(() => {});
+      source?.disconnect?.();
+      if (ownsAudioContext) audioContext?.close?.().catch(() => {});
     },
   };
 }
 
-function speechRecognizer(role, onFinal) {
+function speechRecognizer(getRole, onFinal, isCaptureActive) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) return { available: false, start() {}, stop() {} };
   const recognition = new SpeechRecognition();
@@ -220,8 +235,9 @@ function speechRecognizer(role, onFinal) {
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
       const result = event.results[index];
       if (!result.isFinal) continue;
+      if (isCaptureActive && !isCaptureActive()) continue;
       const text = String(result[0]?.transcript || "").trim();
-      if (text) onFinal({ role, text });
+      if (text) onFinal({ role: getRole(), text });
     }
   };
   recognition.onend = () => {
@@ -243,7 +259,7 @@ function speechRecognizer(role, onFinal) {
 }
 
 export class HandoffCall {
-  constructor({ role, line, sessionId, remoteAudio, onState, onTranscript, captureCaptions = role === "caller" }) {
+  constructor({ role, line, sessionId, remoteAudio, onState, onTranscript, captureCaptions = true, captionRole, isCaptureActive, audioContext }) {
     this.role = role;
     this.line = line;
     this.sessionId = sessionId;
@@ -251,13 +267,23 @@ export class HandoffCall {
     this.onState = onState || (() => {});
     this.onTranscript = onTranscript || (() => {});
     this.captureCaptions = captureCaptions;
+    this.captionRole = captionRole || (() => this.role);
+    this.isCaptureActive = isCaptureActive || (() => true);
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    this.captionAudioContext = audioContext || null;
+    this.ownsCaptionAudioContext = false;
+    if (!this.captionAudioContext && AudioContext) {
+      try {
+        this.captionAudioContext = new AudioContext();
+        this.ownsCaptionAudioContext = true;
+      } catch {}
+    }
     this.captionKey = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     this.pc = null;
     this.localStream = null;
     this.captions = [];
     this.captionQueue = Promise.resolve();
     this.localCaptioned = false;
-    this.remoteCaptioned = false;
     this.remoteSet = false;
     this.pendingIce = [];
     this.localIce = [];
@@ -303,6 +329,7 @@ export class HandoffCall {
       session_id: this.sessionId,
       from: "staff",
       kind: "answer",
+      caption_key: this.captionKey,
       payload: { type: answer.type, sdp: answer.sdp },
     });
     this.startedAt = Date.now();
@@ -371,6 +398,8 @@ export class HandoffCall {
     this.disconnectTimer = null;
     for (const caption of this.captions) caption.stop();
     this.captions = [];
+    if (this.ownsCaptionAudioContext) this.captionAudioContext?.close?.().catch(() => {});
+    this.captionAudioContext = null;
     for (const track of this.localStream?.getTracks() || []) track.stop();
     this.localStream = null;
     try { this.pc?.close(); } catch {}
@@ -396,10 +425,6 @@ export class HandoffCall {
         this.remoteAudio.srcObject = stream;
         this.remoteAudio.play?.().catch(() => {});
       }
-      if (this.captureCaptions && !this.remoteCaptioned && stream.getAudioTracks().length) {
-        this.remoteCaptioned = true;
-        this.#captionStream(stream, this.role === "staff" ? "caller" : "staff");
-      }
     };
     this.pc.onconnectionstatechange = () => {
       const state = this.pc?.connectionState;
@@ -419,6 +444,7 @@ export class HandoffCall {
       video: false,
     });
     for (const track of this.localStream.getTracks()) this.pc.addTrack(track, this.localStream);
+    if (this.muted) this.setMuted(true);
   }
 
   #sendIce(candidate) {
@@ -434,23 +460,25 @@ export class HandoffCall {
     if (!this.captureCaptions || this.localCaptioned || this.closed) return;
     this.localCaptioned = true;
     try { await this.reviveLocalAudio(); } catch {}
-    this.#captionStream(this.localStream, this.role);
+    this.#captionStream(this.localStream);
   }
 
-  #captionStream(stream, role) {
+  #captionStream(stream) {
     if (!stream || this.closed) return;
     const caption = streamCaptions({
       stream,
-      role,
+      getRole: this.captionRole,
       line: this.line,
       sessionId: this.sessionId,
       captionKey: this.captionKey,
-      reviveStream: role === this.role ? () => this.reviveLocalAudio() : null,
+      reviveStream: () => this.reviveLocalAudio(),
+      isCaptureActive: this.isCaptureActive,
+      sharedAudioContext: this.captionAudioContext,
       enqueueUpload: (task) => {
         this.captionQueue = this.captionQueue.then(task);
       },
       isClosed: () => this.closed,
-      onText: ({ text }) => {
+      onText: ({ role, text }) => {
         this.onTranscript({ role, text });
         if (!recorderMime()) {
           postJson(`/api/handoff/${encodeURIComponent(this.line)}/transcript`, {

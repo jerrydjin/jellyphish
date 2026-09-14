@@ -546,6 +546,7 @@ struct SignalRequest {
     session_id: String,
     from: String,
     kind: String,
+    caption_key: Option<String>,
     payload: Value,
 }
 
@@ -614,6 +615,7 @@ async fn handoff_signal(
             request.session_id,
             request.from,
             request.kind,
+            request.caption_key,
             request.payload,
         )
         .map_err(handoff_error)?;
@@ -656,6 +658,7 @@ async fn handoff_local_transcript(
     if !state.monitor.read().await.accepts_captions(
         &line,
         &payload.session_id,
+        &payload.role,
         header(&headers, "x-caption-key").unwrap_or_default(),
     ) {
         return Err(ApiError(
@@ -698,6 +701,7 @@ async fn handoff_transcribe_audio(
     if !state.monitor.read().await.accepts_captions(
         &line,
         session_id,
+        role,
         header(&headers, "x-caption-key").unwrap_or_default(),
     ) {
         return Err(ApiError(
@@ -708,13 +712,21 @@ async fn handoff_transcribe_audio(
     if body.len() < 200 {
         return Ok((StatusCode::OK, Json(json!({ "text": "" }))));
     }
+    let content_type = header(&headers, "content-type").unwrap_or("application/octet-stream");
+    tracing::info!(
+        %line,
+        %session_id,
+        %role,
+        audio_bytes = body.len(),
+        %content_type,
+        "handoff caption audio received"
+    );
     if !state.elevenlabs.configured() {
         return Err(ApiError(
             StatusCode::SERVICE_UNAVAILABLE,
             "speech-to-text is not configured".to_owned(),
         ));
     }
-    let content_type = header(&headers, "content-type").unwrap_or("application/octet-stream");
     let extension = if content_type.contains("webm") {
         "webm"
     } else if content_type.contains("mp4") {
@@ -726,7 +738,17 @@ async fn handoff_transcribe_audio(
         .elevenlabs
         .transcribe_audio(body.to_vec(), content_type, &format!("speech.{extension}"))
         .await
-        .map_err(|error| ApiError(StatusCode::BAD_GATEWAY, error.to_string()))?;
+        .map_err(|error| {
+            tracing::warn!(%line, %session_id, %role, %error, "handoff caption transcription failed");
+            ApiError(StatusCode::BAD_GATEWAY, error.to_string())
+        })?;
+    tracing::info!(
+        %line,
+        %session_id,
+        %role,
+        transcript_chars = text.chars().count(),
+        "handoff caption transcription completed"
+    );
     if text.is_empty() {
         return Ok((StatusCode::OK, Json(json!({ "text": "" }))));
     }
@@ -1319,6 +1341,7 @@ mod tests {
             "session_id": "conv_staff_1",
             "from": "staff",
             "kind": "answer",
+            "caption_key": "staff-caption-secret-1",
             "payload": { "type": "answer", "sdp": "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n" }
         });
         let response = app
@@ -1371,6 +1394,7 @@ mod tests {
             "session_id": "conv_staff_2",
             "from": "staff",
             "kind": "answer",
+            "caption_key": "staff-caption-secret-2",
             "payload": { "type": "answer", "sdp": "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n" }
         });
         let response = app
@@ -1402,13 +1426,25 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rejected.status(), StatusCode::CONFLICT);
+        let wrong_role_key = app
+            .clone()
+            .oneshot(
+                Request::post("/api/handoff/studio-sol/transcript")
+                    .header("content-type", "application/json")
+                    .header("x-caption-key", "caption-secret-2")
+                    .body(Body::from(first.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(wrong_role_key.status(), StatusCode::CONFLICT);
         for _ in 0..2 {
             let response = app
                 .clone()
                 .oneshot(
                     Request::post("/api/handoff/studio-sol/transcript")
                         .header("content-type", "application/json")
-                        .header("x-caption-key", "caption-secret-2")
+                        .header("x-caption-key", "staff-caption-secret-2")
                         .body(Body::from(first.to_string()))
                         .unwrap(),
                 )
@@ -1416,6 +1452,23 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::ACCEPTED);
         }
+        let caller_from_staff_console = serde_json::json!({
+            "session_id": "conv_staff_2",
+            "role": "caller",
+            "text": "I am still here after the handoff."
+        });
+        let caller_response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/handoff/studio-sol/transcript")
+                    .header("content-type", "application/json")
+                    .header("x-caption-key", "staff-caption-secret-2")
+                    .body(Body::from(caller_from_staff_console.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(caller_response.status(), StatusCode::ACCEPTED);
         let response = app
             .clone()
             .oneshot(
@@ -1447,9 +1500,10 @@ mod tests {
             .unwrap();
         let body: Value =
             serde_json::from_slice(&to_bytes(state.into_body(), 64 * 1024).await.unwrap()).unwrap();
-        assert_eq!(body["transcript"].as_array().unwrap().len(), 2);
+        assert_eq!(body["transcript"].as_array().unwrap().len(), 3);
         assert_eq!(body["transcript"][0]["role"], "staff");
         assert_eq!(body["transcript"][1]["role"], "caller");
+        assert_eq!(body["transcript"][2]["role"], "caller");
 
         let silent = app
             .clone()
@@ -1457,7 +1511,7 @@ mod tests {
                 Request::post("/api/handoff/studio-sol/transcribe")
                     .header("x-session-id", "conv_staff_2")
                     .header("x-role", "staff")
-                    .header("x-caption-key", "caption-secret-2")
+                    .header("x-caption-key", "staff-caption-secret-2")
                     .header("content-type", "audio/webm")
                     .body(Body::from(vec![1, 2, 3, 4]))
                     .unwrap(),

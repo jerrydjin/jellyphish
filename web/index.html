@@ -114,6 +114,9 @@
       .call-toggle:disabled { border-color: var(--border-strong); color: var(--muted); background: var(--paper); cursor: wait; }
       .staff-mute { width: 100%; min-height: 42px; padding: 10px 14px; border: 1px solid var(--border-strong); border-radius: 3px; color: #111; background: #fff; cursor: pointer; font-size: .8rem; }
       .staff-mute.on { color: #fff; background: #111; }
+      .speaker-role { display: grid; gap: 6px; color: var(--muted); font-size: .72rem; }
+      .speaker-role[hidden] { display: none; }
+      .speaker-role select { width: 100%; min-height: 42px; padding: 9px 12px; border: 1px solid var(--border-strong); border-radius: 3px; color: #111; background: #fff; font: inherit; }
       .monitor-card.ringing .wave i, .monitor-card.live .wave i { animation: wave .85s ease-in-out infinite alternate; }
       .staff-stage .live-lines { height: 220px; }
       .line.staff .line-role { color: #6a7500; }
@@ -225,7 +228,7 @@
           <div class="monitor-title"><h2 id="monitor-title">Monitored human handoff</h2><span id="monitor-subtitle">No transferred call</span></div>
           <span class="status-pill idle" id="monitor-status">Idle</span>
         </div>
-        <audio id="handoff-remote" autoplay playsinline></audio>
+        <audio id="handoff-remote" autoplay playsinline muted></audio>
         <div class="staff-stage">
           <div class="staff-meta">
             <div class="live-heading"><h2>Staff line</h2></div>
@@ -234,7 +237,12 @@
             <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
             <div class="staff-actions">
               <button class="call-toggle" id="staff-answer" type="button" hidden>Answer incoming call</button>
-              <button class="staff-mute" id="staff-mute" type="button" hidden>Mute</button>
+              <label class="speaker-role" id="speaker-role-control" hidden>Who is speaking into this device?
+                <select id="handoff-speaker">
+                  <option value="caller">Caller</option>
+                  <option value="staff">Staff</option>
+                </select>
+              </label>
               <button class="call-toggle end" id="staff-hangup" type="button" hidden>End staff call</button>
             </div>
           </div>
@@ -259,7 +267,7 @@
     </main>
     <script type="module">
       import { callerFacingSpeech, conversationListFingerprint, handoffSidecarTranscript, humanOutcome as presentHumanOutcome, liveElapsedSeconds, operatorStaffPhase, routePresentation, shouldAutoselectConversation } from "/call-lifecycle.mjs?v=stream8";
-      import { fetchHandoffRoom, HandoffCall } from "/handoff-call.mjs?v=stream10";
+      import { fetchHandoffRoom, HandoffCall } from "/handoff-call.mjs?v=stream16";
 
       const $ = (id) => document.getElementById(id);
       const BUSINESSES = {
@@ -285,6 +293,13 @@
       let incomingRoom = null;
       let staffCall = null;
       let staffCallStartedAt = 0;
+      let handoffSpeakerRole = "caller";
+
+      function setHandoffSpeakerRole(role) {
+        handoffSpeakerRole = role === "staff" ? "staff" : "caller";
+        $("handoff-speaker").value = handoffSpeakerRole;
+        renderMonitor();
+      }
       let ignoreSettledSlots = false;
       // Call timestamps come from the server; correct for this browser's clock drift.
       let clockOffset = 0;
@@ -333,7 +348,7 @@
         $("staff-caption").textContent = ringing
           ? `${biz.assistant} approved this caller. Answer to take over the line.`
           : onStaffLine
-            ? `${biz.assistant} is silent. This is a live staff conversation.`
+            ? `${biz.assistant} is silent. Microphone is assigned to ${handoffSpeakerRole}.`
             : phase === "ended"
               ? "The staff call has ended."
               : phase === "monitoring"
@@ -341,10 +356,9 @@
                 : `Waiting for ${biz.assistant} to hand off a screened caller`;
         $("staff-route").textContent = ringing ? "Incoming" : onStaffLine ? "Live" : "Human line";
         $("staff-answer").hidden = !ringing;
-        $("staff-mute").hidden = !staffCall;
+        $("speaker-role-control").hidden = !staffCall;
         $("staff-hangup").hidden = !(staffCall || ringing);
-        $("staff-mute").classList.toggle("on", Boolean(staffCall?.muted));
-        $("staff-mute").textContent = staffCall?.muted ? "Unmute" : "Mute";
+        $("handoff-speaker").value = handoffSpeakerRole;
         $("sidecar-meta").innerHTML = idle
           ? `<span class="sidecar-tag">Staff pickup</span><span class="sidecar-tag">AI silent after handoff</span>`
           : `<span class="sidecar-tag ${monitor.disclosureGiven ? "ok" : ""}">${monitor.disclosureGiven ? "Disclosure given" : "Disclosure missing"}</span><span class="sidecar-tag ${monitor.aiMuted ? "ok" : ""}">${monitor.aiMuted ? "AI silent" : "Check AI state"}</span><span class="sidecar-tag ${!degraded && !idle ? "ok" : ""}">${degraded ? "Transfer preserved" : onStaffLine || ringing ? "Live staff line" : "Transcript streaming"}</span>`;
@@ -646,6 +660,8 @@
           line: LINE,
           sessionId: room.sessionId,
           remoteAudio: $("handoff-remote"),
+          captionRole: () => handoffSpeakerRole,
+          isCaptureActive: () => true,
           onState: (phase) => {
             if (phase === "connected") staffCallStartedAt = Date.now();
             if (["ended", "timeout", "failed", "disconnected"].includes(phase)) {
@@ -658,17 +674,14 @@
         try {
           await staffCall.acceptStaff(room);
           staffCallStartedAt = Date.now();
+          setHandoffSpeakerRole("caller");
         } catch (error) {
           staffCall = null;
           $("staff-caption").textContent = error.message;
         }
         renderMonitor();
       });
-      $("staff-mute").addEventListener("click", () => {
-        if (!staffCall) return;
-        staffCall.setMuted(!staffCall.muted);
-        renderMonitor();
-      });
+      $("handoff-speaker").addEventListener("change", (event) => setHandoffSpeakerRole(event.target.value));
       $("staff-hangup").addEventListener("click", async () => {
         await closeHandoffLine();
         renderMonitor();

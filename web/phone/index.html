@@ -357,11 +357,11 @@
         </div>
       </div>
     </div>
-    <audio id="handoff-remote" autoplay playsinline></audio>
+        <audio id="handoff-remote" autoplay playsinline muted></audio>
 
     <script type="module">
       import { applyLiveTurn, isStaffHandoffSpeech, liveTranscriptPayload, normalizeConversationMessage, normalizeIncomingSocketEvent } from "/call-lifecycle.mjs?v=stream12";
-      import { callerPreviewFromTurns, HandoffCall } from "/handoff-call.mjs?v=stream10";
+      import { callerPreviewFromTurns, HandoffCall } from "/handoff-call.mjs?v=stream16";
 
       let ConversationClient = null;
       const clientReady = import("https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.25.0/+esm")
@@ -728,6 +728,8 @@
           line: current.line,
           sessionId,
           remoteAudio: $("handoff-remote"),
+          captureCaptions: false,
+          audioContext: audioContext(),
           onState: (phase) => {
             if (phase === "connected") stopHandoffRingback();
             if (["ended", "timeout", "failed", "disconnected"].includes(phase)) {

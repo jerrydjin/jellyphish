@@ -91,6 +91,8 @@ pub struct HandoffRoom {
     #[serde(skip)]
     caption_key: String,
     #[serde(skip)]
+    staff_caption_key: Option<String>,
+    #[serde(skip)]
     ended_at: Option<i64>,
 }
 
@@ -329,6 +331,7 @@ impl MonitorHub {
             caller_ice: Vec::new(),
             staff_ice: Vec::new(),
             caption_key,
+            staff_caption_key: None,
             ended_at: None,
         };
         self.rooms.insert(key, room.clone());
@@ -343,6 +346,7 @@ impl MonitorHub {
         session_id: String,
         from: String,
         kind: String,
+        caption_key: Option<String>,
         payload: Value,
     ) -> anyhow::Result<HandoffRoom> {
         if !matches!(from.as_str(), "caller" | "staff") {
@@ -358,11 +362,16 @@ impl MonitorHub {
                     anyhow::bail!("only staff can answer");
                 }
                 validate_sdp(&payload, "answer")?;
+                let staff_caption_key = caption_key.unwrap_or_default();
+                if staff_caption_key.is_empty() {
+                    anyhow::bail!("staff caption key is required");
+                }
                 let room = self.rooms.get_mut(&key).expect("room exists");
                 if room.answer.is_some() && room.status != "ended" {
                     anyhow::bail!("this handoff was already answered");
                 }
                 room.answer = Some(payload.clone());
+                room.staff_caption_key = Some(staff_caption_key);
                 room.status = "connected".to_owned();
                 room.ended_at = None;
             }
@@ -441,14 +450,30 @@ impl MonitorHub {
         self.rooms.get(&room_key(line, session_id)).cloned()
     }
 
-    pub fn accepts_captions(&self, line: &str, session_id: &str, caption_key: &str) -> bool {
+    pub fn accepts_captions(
+        &self,
+        line: &str,
+        session_id: &str,
+        role: &str,
+        caption_key: &str,
+    ) -> bool {
         self.room(line, session_id).is_some_and(|room| {
             let recently_ended = room
                 .ended_at
                 .is_some_and(|ended_at| now_millis().saturating_sub(ended_at) <= 30_000);
             (room.status == "connected" || recently_ended)
                 && !caption_key.is_empty()
-                && room.caption_key == caption_key
+                && match role {
+                    // The connected staff console owns same-device demo
+                    // transcription and may label its single mic as either
+                    // participant. The caller key remains valid for callers.
+                    "caller" => {
+                        room.caption_key == caption_key
+                            || room.staff_caption_key.as_deref() == Some(caption_key)
+                    }
+                    "staff" => room.staff_caption_key.as_deref() == Some(caption_key),
+                    _ => false,
+                }
         })
     }
 
